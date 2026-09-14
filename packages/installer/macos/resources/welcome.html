@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+@STYLE@
+</style>
+</head>
+<body>
+<img class="mark mark-light" src="mark-light.png" alt="">
+<img class="mark mark-dark" src="mark-dark.png" alt="">
+<h1>parsec</h1>
+<p class="tag"><span class="stat">2×</span> the context. <span class="stat">½</span> the cost.</p>
+
+<p>parsec runs a local proxy on <code>127.0.0.1</code> that curates the context your Claude clients send. Model traffic still leaves from this machine with your own credentials.</p>
+
+<h2>what this installs</h2>
+<ul>
+  <li>the <code>parsec</code> binary at <code>/usr/local/parsec</code> and <code>~/.parsec/bin</code>, on your PATH</li>
+  <li>routing for the Claude clients found on this Mac — Claude Code, Codex CLI, opencode, Claude Desktop — each one a choice you can untick</li>
+  <li>a menu-bar app with live status</li>
+</ul>
+
+<h2>what it will ask for</h2>
+<ul>
+  <li><strong>your password, once</strong> — the standard Installer prompt. The Claude Desktop step uses it to trust mitmproxy's certificate, so no second prompt appears later.</li>
+  <li><strong>one toggle, Claude Desktop only</strong> — macOS requires you to approve the "Mitmproxy Redirector" network extension in System Settings. The installer opens the pane; the menu-bar app waits for the switch and finishes the setup.</li>
+</ul>
+
+<p class="muted">Undo anytime: <code>parsec disable &lt;tool&gt;</code> · <code>sudo /usr/local/parsec/uninstall.sh</code></p>
+</body>
+</html>

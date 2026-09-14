@@ -1,0 +1,602 @@
+name: release
+
+# Builds the per-platform `parsec` binaries and publishes the assembled plugin
+# to the public marketplace repo daseinlabs/plugins (DIRECTION.md §7b:
+# distribution is git-clone with no build step, so binaries ship prebuilt).
+#
+# Publishing is TAG-ONLY (docs/release-channels.md). Pushes to main still run
+# the cross-platform build matrix — ci.yml is Linux-only, so this is where a
+# macOS or Windows build break surfaces before a release — but nothing ships.
+# Every tag publishes the same way (single channel, 2026-09-02): the plugins
+# repo tree is refreshed in full (plugin + binaries + install scripts) and
+# both keys of latest.json advance together, so marketplace plugin users and
+# install-script users always get the newest release. latest.json keeps its
+# {stable, patch} two-key shape only because install scripts already in the
+# wild parse it; the entries are always identical now.
+# Every tag also becomes a GitHub Release ON daseinlabs/plugins carrying the
+# per-platform binaries and a sha256 manifest — that is the permanent
+# versioned history. The plugins repo history is append-only (normal commits,
+# one per release, tagged); binaries land in the tree only on minors, which
+# is what keeps user clones from growing ~80 MB per publish without the old
+# force-push-a-single-squashed-commit trick.
+# Requires the PLUGIN_PUBLISH_TOKEN secret: a fine-grained PAT with
+# contents:write on daseinlabs/plugins.
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:  # manual run to test the matrix without publishing
+
+# Tag runs PUBLISH (append to the plugins repo), so they must serialize into
+# ONE group or the second push fails non-fast-forward — keep them all in
+# `release`. Main-push runs only build the matrix as CI and must NOT join that
+# group: a main build (or an unrelated PR merge) holding `release` starves the
+# tag run that actually publishes, which is how v0.2.5's tag run was cancelled
+# behind someone else's merge. Non-tag runs get a per-ref group instead.
+concurrency:
+  group: ${{ startsWith(github.ref, 'refs/tags/') && 'release' || format('release-ci-{0}', github.ref) }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: macos-14        # arm64
+            platform: darwin-arm64
+          # darwin-x64 skipped: macos-13 (last Intel runner) is no longer
+          # available. Revisit via cross-compile (x86_64-apple-darwin target
+          # on macos-14) if Intel-Mac users show up.
+          - os: ubuntu-latest   # x64
+            platform: linux-x64
+          - os: windows-latest  # x64
+            platform: win-x64   # matches bin/parsec.cmd dispatch
+            ext: .exe
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      # PARSEC_DEFAULT_BRAIN_URL is baked into the binary at compile time
+      # (brain.rs BAKED_BRAIN_URL): released plugins reach the production
+      # brain with zero user configuration. Runtime PARSEC_BRAIN_URL still
+      # overrides; dev/CI builds (no env here) bake nothing. The baked
+      # default implies the v2 contract (chunk text to the brain, which
+      # embeds) — see BrainConfig::from_env.
+      #
+      # No model ships with the client since 2026-07-20: the embedder moved
+      # server-side (docs/server-side-embedding.md), so the `onnx` feature,
+      # the PARSEC_DEFAULT_MODEL_* repo variables, and first-run model
+      # download are all gone. Install → first session → curation on, with
+      # no 1.3GB download in the middle.
+      # PARSEC_DEFAULT_PLATFORM_URL is baked the same way (ledger_ship.rs
+      # BAKED_PLATFORM_URL): released binaries know where to POST savings-ledger
+      # rows. Shipping still requires a per-user PARSEC_API_KEY at runtime (the
+      # psc_ key the user mints in the dashboard), so no rows leave without it.
+      - run: cargo build --release -p parsec-proxy
+        env:
+          PARSEC_DEFAULT_BRAIN_URL: ${{ vars.PARSEC_DEFAULT_BRAIN_URL }}
+          PARSEC_DEFAULT_PLATFORM_URL: ${{ vars.PARSEC_DEFAULT_PLATFORM_URL }}
+      # Launch smoke: a binary that builds but can't start must fail HERE,
+      # not on a user's machine after install.
+      - run: ./target/release/parsec${{ matrix.ext }} --version
+      # NOTE (2026-07-20): this bundling existed because ort's /MD prebuilts
+      # forced the dynamic CRT. ort is gone, so the C++ runtime (msvcp140) is
+      # very likely no longer imported — but that is UNVERIFIED on a clean
+      # Windows box, and the failure mode if we are wrong is silent
+      # (0xC0000135, no stderr, undiagnosable from a hook error). Kept until
+      # a win-x64 release is dumpbin-checked; ~750 KB is cheap insurance.
+      # parsec.exe imports msvcp140/vcruntime140 — VC++ redistributable DLLs
+      # that are present on this runner (VS is installed) but absent on clean
+      # user machines, where the loader kills the process before main()
+      # (0xC0000135, no stderr, undiagnosable from a hook error). App-local
+      # deployment: ship the four imported DLLs (~750 KB) next to the exe.
+      # The smoke test above can't catch a miss — the runner always resolves
+      # them from its own redist install.
+      - name: Bundle VC++ runtime DLLs
+        if: matrix.platform == 'win-x64'
+        shell: pwsh
+        run: |
+          # Locate the redist via vswhere rather than a hardcoded VS-year path:
+          # the runner image's VS version moves under us (2022 → 2026 in the
+          # June 2026 windows-latest migration).
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $crt = & $vswhere -latest -products * -prerelease -find 'VC\Redist\MSVC\*\x64\Microsoft.VC14?.CRT' |
+            Sort-Object | Select-Object -Last 1
+          if (-not $crt) { Write-Error "VC redist CRT dir not found on runner"; exit 1 }
+          foreach ($dll in "msvcp140.dll","msvcp140_1.dll","vcruntime140.dll","vcruntime140_1.dll") {
+            Copy-Item (Join-Path $crt $dll) target/release/
+          }
+          Get-ChildItem target/release/*.dll
+      - uses: actions/upload-artifact@v4
+        with:
+          name: parsec-${{ matrix.platform }}
+          path: |
+            target/release/parsec${{ matrix.ext }}
+            target/release/msvcp140*.dll
+            target/release/vcruntime140*.dll
+          if-no-files-found: error
+
+  # Assemble the full plugin (markdown/JSON + all per-platform binaries) into
+  # a single downloadable zip. On tag pushes it is attached to a GitHub
+  # Release; workflow_dispatch runs still get it as a CI artifact.
+  # Native installers (packages/installer/README.md): a macOS .pkg and a
+  # Windows Inno Setup .exe built from the `build` job's binaries. Both build
+  # unsigned when the secrets named below are missing; the signing steps are
+  # wired and switch on by themselves. Runs on every ref like `build` does, so
+  # an ISCC or productbuild break surfaces on main, not on a tag.
+  installers:
+    needs: build
+    # Windows signing authenticates to Azure Artifact Signing with a GitHub
+    # OIDC token (no client secret). `id-token: write` mints it; `environment:
+    # release` makes the token's subject `repo:…:environment:release` on every
+    # ref, so one federated credential on the Entra app covers main pushes and
+    # v* tags alike (tag refs can't be wildcarded in a plain subject).
+    permissions:
+      id-token: write
+      contents: read
+    environment: release
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            platform: macos-arm64
+          - os: windows-latest
+            platform: win-x64
+    runs-on: ${{ matrix.os }}
+    # Notarization waits a few minutes; a build + smoke install is well under
+    # 15. Anything longer is a hang, not work — fail fast, free the runner.
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: parsec-${{ matrix.platform == 'macos-arm64' && 'darwin-arm64' || 'win-x64' }}
+          path: bin
+
+      # ── macOS ──────────────────────────────────────────────────────────
+      - name: Detect Apple signing secrets
+        if: matrix.platform == 'macos-arm64'
+        id: apple
+        env:
+          APP_P12: ${{ secrets.APPLE_DEVELOPER_ID_APPLICATION_P12 }}
+          INST_P12: ${{ secrets.APPLE_DEVELOPER_ID_INSTALLER_P12 }}
+          KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
+          ISSUER: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
+          KEY: ${{ secrets.APPLE_NOTARY_KEY_P8 }}
+        run: |
+          # Signing needs BOTH certificates: Application for the binary inside
+          # the payload, Installer for the pkg wrapper. One without the other
+          # produces a pkg notarytool rejects, so treat that as unsigned and
+          # say why rather than half-signing.
+          sign=false; notarize=false
+          if [ -n "$APP_P12" ] && [ -n "$INST_P12" ]; then
+            sign=true
+            if [ -n "$KEY_ID" ] && [ -n "$ISSUER" ] && [ -n "$KEY" ]; then
+              notarize=true
+            else
+              echo "::warning::signing but NOT notarizing — set APPLE_NOTARY_KEY_ID, APPLE_NOTARY_ISSUER_ID and APPLE_NOTARY_KEY_P8"
+            fi
+          elif [ -n "$APP_P12" ] || [ -n "$INST_P12" ]; then
+            echo "::warning::only one of APPLE_DEVELOPER_ID_APPLICATION_P12 / APPLE_DEVELOPER_ID_INSTALLER_P12 is set — building an UNSIGNED pkg"
+          else
+            echo "::notice::no APPLE_DEVELOPER_ID_*_P12 secrets — building an UNSIGNED pkg"
+          fi
+          echo "sign=$sign" >> "$GITHUB_OUTPUT"
+          echo "notarize=$notarize" >> "$GITHUB_OUTPUT"
+      - name: Import Developer ID certificates
+        if: matrix.platform == 'macos-arm64' && steps.apple.outputs.sign == 'true'
+        env:
+          APP_P12: ${{ secrets.APPLE_DEVELOPER_ID_APPLICATION_P12 }}
+          APP_P12_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_APPLICATION_P12_PASSWORD }}
+          INST_P12: ${{ secrets.APPLE_DEVELOPER_ID_INSTALLER_P12 }}
+          INST_P12_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_INSTALLER_P12_PASSWORD }}
+        run: |
+          set -euo pipefail
+          KC="$RUNNER_TEMP/sign.keychain-db"; KCPW="$(uuidgen)"
+          security create-keychain -p "$KCPW" "$KC"
+          security set-keychain-settings -lut 21600 "$KC"
+          security unlock-keychain -p "$KCPW" "$KC"
+          import_p12() {  # $1 base64 p12, $2 password
+            echo "$1" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+            security import "$RUNNER_TEMP/cert.p12" -P "$2" -A -t cert -f pkcs12 -k "$KC"
+            rm -f "$RUNNER_TEMP/cert.p12"
+          }
+          import_p12 "$APP_P12" "$APP_P12_PASSWORD"
+          import_p12 "$INST_P12" "$INST_P12_PASSWORD"
+          # codesign/productsign run non-interactively; without this the
+          # keychain prompts for access and the job hangs.
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KCPW" "$KC" >/dev/null
+          security list-keychain -d user -s "$KC" login.keychain-db
+          identity() {  # $1 identity type, e.g. "Developer ID Application"
+            security find-identity -v -p basic "$KC" | grep "$1" | head -1 | awk -F'"' '{print $2}'
+          }
+          app="$(identity 'Developer ID Application')"
+          inst="$(identity 'Developer ID Installer')"
+          [ -n "$app" ] || { echo "no Developer ID Application identity in APPLE_DEVELOPER_ID_APPLICATION_P12" >&2; exit 1; }
+          [ -n "$inst" ] || { echo "no Developer ID Installer identity in APPLE_DEVELOPER_ID_INSTALLER_P12" >&2; exit 1; }
+          echo "DEVELOPER_ID_APPLICATION=$app" >> "$GITHUB_ENV"
+          echo "DEVELOPER_ID_INSTALLER=$inst" >> "$GITHUB_ENV"
+      - name: Build macOS pkg
+        if: matrix.platform == 'macos-arm64'
+        env:
+          APPLE_NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
+          APPLE_NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
+          APPLE_NOTARY_KEY_P8: ${{ secrets.APPLE_NOTARY_KEY_P8 }}
+        run: |
+          set -euo pipefail
+          chmod +x bin/parsec
+          flags=()
+          [ "${{ steps.apple.outputs.sign }}" = true ] && flags+=(--sign)
+          if [ "${{ steps.apple.outputs.notarize }}" = true ]; then
+            echo "$APPLE_NOTARY_KEY_P8" > "$RUNNER_TEMP/notary.p8"
+            export APPLE_NOTARY_KEY_P8_PATH="$RUNNER_TEMP/notary.p8"
+            flags+=(--notarize)
+          fi
+          packages/installer/macos/build.sh --binary bin/parsec --out out "${flags[@]}"
+          rm -f "$RUNNER_TEMP/notary.p8"
+      - name: Smoke-install the pkg (core + codex + opencode), upgrade, uninstall
+        if: matrix.platform == 'macos-arm64'
+        run: |
+          set -euo pipefail
+          pkg="$(ls out/parsec-*-macos-arm64.pkg)"
+          choices=packages/installer/macos/choices-ci.xml
+          summary="$HOME/.parsec/install-summary.txt"
+          check_install() {  # $1 = label
+            pkgutil --pkgs | grep -q rocks.dasein.parsec.core
+            /usr/local/parsec/bin/parsec --version
+            "$HOME/.parsec/bin/parsec" --version
+            echo "--- install-summary.txt ($1)"; cat "$summary"
+            # Every postinstall exits 0 by contract and reports through the
+            # summary, so the summary is the only place a failure shows.
+            if grep -Eq 'failed|did not|could not|does not run' "$summary"; then
+              echo "::error::a postinstall reported a problem ($1)"; exit 1
+            fi
+            grep -q 'installed parsec' "$summary"
+            # up --restart must have left a parsec supervisor on the port.
+            "$HOME/.parsec/bin/parsec" up | grep -q 'already listening'
+          }
+          sudo env PARSEC_NO_LOGIN=1 installer -pkg "$pkg" -applyChoiceChangesXML "$choices" -target / -dumplog -verboseR
+          check_install fresh
+          # Upgrade over the running proxy: same pkg again. core's postinstall
+          # swaps ~/.parsec/bin/parsec under it and restarts it on the new
+          # inode; the summary must read exactly like a fresh install.
+          sudo env PARSEC_NO_LOGIN=1 installer -pkg "$pkg" -applyChoiceChangesXML "$choices" -target / -dumplog -verboseR
+          check_install upgrade
+          grep -c 'core: proxy restarted' /var/log/install.log | grep -qx 2
+          sudo /usr/local/parsec/uninstall.sh --yes --user "$(id -un)"
+          ! pkgutil --pkgs | grep -q rocks.dasein.parsec
+          [ ! -e /usr/local/parsec ]
+          [ ! -e "$HOME/.parsec/bin/parsec" ]
+          if pgrep -fl '\.parsec/bin/parsec proxy'; then echo '::error::proxy survived uninstall'; exit 1; fi
+
+      # ── Windows ────────────────────────────────────────────────────────
+      # Azure Artifact Signing (ex Trusted Signing). The account, endpoint and
+      # certificate profile are not secrets; the Entra app that may sign with
+      # the profile is identified by the three AZURE_* secrets and trusted via
+      # OIDC federation, so there is nothing to rotate.
+      - name: Detect Azure signing secrets
+        if: matrix.platform == 'win-x64'
+        id: azsign
+        shell: bash
+        env:
+          CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+        run: |
+          if [ -n "$CLIENT_ID" ] && [ -n "$TENANT_ID" ] && [ -n "$SUBSCRIPTION_ID" ]; then
+            echo "sign=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::no AZURE_CLIENT_ID/AZURE_TENANT_ID/AZURE_SUBSCRIPTION_ID secrets - building an UNSIGNED setup.exe"
+            echo "sign=false" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: azure/login@v3
+        if: matrix.platform == 'win-x64' && steps.azsign.outputs.sign == 'true'
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - name: Fetch the Artifact Signing dlib
+        if: matrix.platform == 'win-x64' && steps.azsign.outputs.sign == 'true'
+        id: dlib
+        shell: pwsh
+        run: |
+          $dir = Join-Path $env:RUNNER_TEMP 'tsc'
+          nuget install Microsoft.ArtifactSigning.Client -Version 1.0.128 -OutputDirectory $dir -NonInteractive
+          if ($LASTEXITCODE) { throw "nuget install failed ($LASTEXITCODE)" }
+          $dlib = Get-ChildItem "$dir\Microsoft.ArtifactSigning.Client.*\bin\x64\Azure.CodeSigning.Dlib.dll" | Select-Object -Last 1
+          if (-not $dlib) { throw 'Azure.CodeSigning.Dlib.dll not found in the NuGet package' }
+          "path=$($dlib.FullName)" >> $env:GITHUB_OUTPUT
+      - name: Build Windows installer
+        if: matrix.platform == 'win-x64'
+        shell: pwsh
+        env:
+          SIGN: ${{ steps.azsign.outputs.sign }}
+          DLIB: ${{ steps.dlib.outputs.path }}
+        run: |
+          $v = (Select-String -Path Cargo.toml -Pattern '^version = "(.+)"' | Select-Object -First 1).Matches[0].Groups[1].Value
+          $signArgs = @{}
+          if ($env:SIGN -eq 'true') {
+            $signArgs = @{
+              SigningEndpoint = 'https://eus.codesigning.azure.net/'
+              SigningAccount  = 'daseinlabs-signing'
+              SigningProfile  = 'parsec-public-trust'
+              DlibPath        = $env:DLIB
+            }
+          }
+          packages/installer/windows/build.ps1 -Version $v -BinDir bin -OutDir out @signArgs
+      - name: Smoke-install the setup.exe (silent)
+        if: matrix.platform == 'win-x64'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $setup = Get-Item out/parsec-*-windows-x64-setup.exe
+          # NOT `Start-Process -Wait`: on Windows that waits for the process AND
+          # every descendant, and Setup's post-install `parsec up --restart`
+          # leaves a detached proxy supervisor running by design — the step
+          # would hang until the job timeout (it did: run 34246464218, 2 h).
+          # -PassThru + WaitForExit waits on Setup's own handle only.
+          $ilog = "$PWD\install.log"
+          $p = Start-Process $setup.FullName -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/TASKS=""',"/LOG=$ilog" -PassThru
+          $p.WaitForExit()
+          if ($p.ExitCode) { if (Test-Path $ilog) { Get-Content $ilog -Tail 40 }; throw "setup.exe exited $($p.ExitCode)" }
+          $bin = "$env:USERPROFILE\.parsec\bin"
+          & "$bin\parsec.exe" --version
+          if ($LASTEXITCODE) { throw "installed parsec.exe does not run ($LASTEXITCODE)" }
+          if (-not (([Environment]::GetEnvironmentVariable('Path','User') -split ';') -contains $bin)) { throw 'user PATH missing the bin dir' }
+          $key = Get-ChildItem HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall |
+            Where-Object { (Get-ItemProperty $_.PSPath).DisplayName -eq 'parsec' }
+          if (-not $key) { throw 'uninstall key missing' }
+          # Upgrade over a process that has the image mapped. `parsec mcp` blocks
+          # on stdin, so it holds parsec.exe + the CRT DLLs open the way an MCP
+          # server inside a live Claude Code session does. v0.2.11 died here with
+          # "vcruntime140.dll" in use: Windows lets a mapped image be renamed
+          # but not overwritten, and the old probe mistook the rename for a
+          # free lock. [Files] now stage into bin\staging and SwapIn renames
+          # the old set to *.old and the new set into place, or rolls back.
+          $holder = Start-Process "$bin\parsec.exe" -ArgumentList 'mcp' -PassThru -WindowStyle Hidden
+          Start-Sleep -Seconds 2
+          $ulog2 = "$PWD\upgrade.log"
+          $p2 = Start-Process $setup.FullName -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/TASKS=""',"/LOG=$ulog2" -PassThru
+          $p2.WaitForExit()
+          if ($p2.ExitCode) { if (Test-Path $ulog2) { Get-Content $ulog2 -Tail 40 }; throw "upgrade setup.exe exited $($p2.ExitCode)" }
+          & "$bin\parsec.exe" --version
+          if ($LASTEXITCODE) { throw "upgraded parsec.exe does not run ($LASTEXITCODE)" }
+          if (Test-Path "$bin\staging") { throw 'staging dir left behind after the swap' }
+          # Post-install steps run through run-step.ps1 (EOF stdin, deadline,
+          # log). Two installs ran `up --restart` through it by now: the log
+          # must show the step and a clean exit, or the runner itself is broken
+          # and every step silently did nothing.
+          $slog = "$env:USERPROFILE\.parsec\installer.log"
+          if (-not (Test-Path $slog)) { throw 'installer.log missing - run-step.ps1 never ran' }
+          Get-Content $slog
+          Copy-Item $slog "$PWD\installer.log"
+          if (-not (Select-String -Path $slog -Pattern 'step: .*up --restart' -Quiet)) { throw 'proxy restart step not logged' }
+          if ((Select-String -Path $slog -Pattern '^\s+exit 0$').Count -lt 2) { throw 'proxy restart step did not exit 0 on both installs' }
+          if ($holder.HasExited) {
+            Write-Host '::warning::the image holder exited early - the move-aside path was not exercised'
+          } else {
+            $aside = Get-ChildItem $bin -Filter '*.old*' | Select-Object -ExpandProperty Name
+            Write-Host "moved aside: $($aside -join ', ')"
+            if (-not ($aside -contains 'parsec.exe.old')) { throw 'upgrade over a mapped image did not move parsec.exe aside' }
+            if (-not ($aside -contains 'vcruntime140.dll.old')) { throw 'upgrade over a mapped image did not move vcruntime140.dll aside' }
+            $holder | Stop-Process -Force
+          }
+          # Inno's uninstaller is two-phase: unins000.exe copies itself to
+          # %TEMP% as _iu*.tmp, launches that, and the original exits at once
+          # (run 34259167148: non-zero in <1 s, no log yet). Wait on the first
+          # handle, then poll the second phase out of existence.
+          $ulog = "$PWD\uninstall.log"
+          $u = Start-Process "$bin\unins000.exe" -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES',"/LOG=$ulog" -PassThru
+          $u.WaitForExit()
+          Write-Host "unins000.exe phase 1 exited $($u.ExitCode)"
+          $deadline = (Get-Date).AddMinutes(3)
+          do {
+            Start-Sleep -Seconds 2
+            $phase2 = Get-Process | Where-Object { $_.ProcessName -like '_iu*' }
+          } while ($phase2 -and (Get-Date) -lt $deadline)
+          if ($phase2) { $phase2 | Stop-Process -Force; throw 'uninstaller second phase still running after 3 min' }
+          if (Test-Path $ulog) { Get-Content $ulog -Tail 15 } else { Write-Host '::warning::no uninstall.log was written' }
+          # The uninstaller's StopParsec must have taken the proxy down with it.
+          $left = Get-CimInstance Win32_Process -Filter "Name = 'parsec.exe'" -ErrorAction SilentlyContinue
+          if ($left) {
+            $left | ForEach-Object { Write-Host "survivor pid=$($_.ProcessId): $($_.CommandLine)" }
+            $left | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+            throw "parsec.exe still running after uninstall"
+          }
+          if (Test-Path "$bin\parsec.exe") { throw 'parsec.exe survived uninstall' }
+          if (([Environment]::GetEnvironmentVariable('Path','User') -split ';') -contains $bin) { throw 'user PATH not cleaned' }
+          $run = Get-ItemProperty HKCU:\Software\Microsoft\Windows\CurrentVersion\Run -ErrorAction SilentlyContinue
+          foreach ($n in 'ParsecTray','ParsecProxy','ParsecInterceptor') { if ($run.$n) { throw "Run value $n left behind" } }
+
+      - uses: actions/upload-artifact@v4
+        if: always()   # the install/uninstall logs are the diagnosis when a smoke step fails
+        with:
+          name: parsec-installer-${{ matrix.platform }}
+          path: |
+            out/*.pkg
+            out/*.exe
+            install.log
+            upgrade.log
+            installer.log
+            uninstall.log
+          if-no-files-found: error
+
+  pack:
+    needs: [build, installers]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # full history + tags: git describe stamps dev versions
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Flatten installer artifacts
+        # upload-artifact keeps the common parent when a job uploads out/*
+        # plus logs beside it, so the .pkg / setup.exe arrive under out/ —
+        # v0.2.11's first tag run died on "no matches found for …/*.pkg".
+        # The steps below expect them at the artifact root.
+        run: |
+          set -euo pipefail
+          for d in artifacts/parsec-installer-*; do
+            find "$d" -mindepth 2 -type f -exec mv -t "$d" {} +
+            find "$d" -mindepth 1 -type d -empty -delete
+          done
+          ls -l artifacts/parsec-installer-*
+      - name: Assemble plugin zip
+        run: |
+          set -euo pipefail
+          rm -rf dist && mkdir -p dist
+          cp -R packages/plugin dist/parsec
+          # Platform dirs are gitignored (absent in CI checkouts); clear any
+          # stragglers before installing fresh builds.
+          rm -rf dist/parsec/bin/darwin-arm64
+          for p in darwin-arm64 linux-x64; do
+            install -D -m 755 "artifacts/parsec-$p/parsec" "dist/parsec/bin/$p/parsec"
+          done
+          install -D -m 644 "artifacts/parsec-win-x64/parsec.exe" "dist/parsec/bin/win-x64/parsec.exe"
+          # App-local VC++ CRT (see the build job's bundle step): the loader
+          # only searches next to the exe, so these must sit in win-x64/.
+          install -m 644 artifacts/parsec-win-x64/*.dll "dist/parsec/bin/win-x64/"
+          chmod 755 dist/parsec/bin/parsec   # upload-artifact drops exec bits
+          (cd dist && zip -r parsec-plugin.zip parsec)
+          echo 'Unzip, then: `claude --plugin-dir ./parsec`' >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: parsec-plugin
+          path: dist/parsec-plugin.zip
+          if-no-files-found: error
+      - name: Attach to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --generate-notes || true
+          gh release upload "$GITHUB_REF_NAME" dist/parsec-plugin.zip \
+            artifacts/parsec-installer-macos-arm64/*.pkg \
+            artifacts/parsec-installer-win-x64/*.exe --clobber
+      # Publish the marketplace repo users actually install from:
+      #   claude plugin marketplace add https://github.com/daseinlabs/plugins
+      #   claude plugin install parsec@parsec-marketplace
+      - name: Publish to daseinlabs/plugins
+        # Tags ONLY — main pushes and workflow_dispatch are dry runs of the
+        # build matrix. Every tag refreshes the whole tree and both
+        # latest.json keys — see the header and docs/release-channels.md.
+        # Forks have no PLUGIN_PUBLISH_TOKEN and skip this step entirely:
+        # their tags still get the GitHub Release attached above.
+        if: startsWith(github.ref, 'refs/tags/') && secrets.PLUGIN_PUBLISH_TOKEN != ''
+        env:
+          PUBLISH_TOKEN: ${{ secrets.PLUGIN_PUBLISH_TOKEN }}
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "publishing v$VERSION"
+
+          # The binary reports CARGO_PKG_VERSION — the workspace version in
+          # the root Cargo.toml — so a tag that disagrees with it would ship
+          # binaries that lie about what they are, blinding the hook's
+          # plugin-updated restart and every future OTA comparison. `make
+          # release VERSION=…` keeps them in step; this catches hand-cut tags.
+          CARGO_VERSION="$(grep -m1 '^version = ' Cargo.toml | cut -d'"' -f2)"
+          if [ "$CARGO_VERSION" != "$VERSION" ]; then
+            echo "tag v$VERSION != workspace version $CARGO_VERSION (Cargo.toml)." >&2
+            echo "cut releases with: make release VERSION=$VERSION" >&2
+            exit 1
+          fi
+
+          # Release assets: per-platform binaries, the win-x64 CRT DLLs, the
+          # plugin zip, and a sha256 manifest. These — not the git tree — are
+          # the permanent versioned history: immutable, per-tag, and free of
+          # clone bloat. The future self-updater downloads from here.
+          rm -rf assets publish
+          mkdir -p assets
+          cp artifacts/parsec-darwin-arm64/parsec assets/parsec-darwin-arm64
+          cp artifacts/parsec-linux-x64/parsec assets/parsec-linux-x64
+          cp artifacts/parsec-win-x64/parsec.exe assets/parsec-win-x64.exe
+          cp artifacts/parsec-win-x64/*.dll assets/
+          cp dist/parsec-plugin.zip assets/
+          # Native installers (packages/installer/): in the same asset set so
+          # manifest.json / latest.json carry their sha256.
+          cp artifacts/parsec-installer-macos-arm64/*.pkg assets/
+          cp artifacts/parsec-installer-win-x64/*.exe assets/
+          # Belt and braces: the built artifact must agree with the tag too
+          # (artifact download drops exec bits, hence the chmod).
+          chmod +x assets/parsec-darwin-arm64 assets/parsec-linux-x64
+          BIN_VERSION="$(assets/parsec-linux-x64 --version)"
+          if [ "$BIN_VERSION" != "parsec $VERSION" ]; then
+            echo "built binary reports '$BIN_VERSION', expected 'parsec $VERSION'" >&2
+            exit 1
+          fi
+          (cd assets && sha256sum -- * \
+            | jq -Rn '[inputs | split("  ") | {(.[1]): .[0]}] | add') > sums.json
+          jq -n --arg v "$VERSION" --arg tag "v$VERSION" --slurpfile s sums.json \
+            '{version: $v, tag: $tag, assets: $s[0]}' > entry.json
+          cp entry.json assets/manifest.json
+
+          # Pre-release tags (any -suffix: v0.3.0-rc.1) publish assets only:
+          # no tree refresh, latest.json untouched — nothing reaches users
+          # who didn't type the tag name. The escape hatch the single
+          # channel otherwise lacks.
+          if [[ "$VERSION" == *-* ]]; then
+            echo "pre-release: assets only — tree and latest.json untouched"
+            GH_TOKEN="$PUBLISH_TOKEN" gh release create "v$VERSION" \
+              --repo daseinlabs/plugins \
+              --title "parsec v$VERSION" \
+              --prerelease \
+              --notes "pre-release — not rolled out; see manifest.json for sha256s" \
+              assets/*
+            exit 0
+          fi
+
+          # Append one commit to the plugins repo — never force-push. Clone
+          # is what makes append possible: we build on the published history
+          # instead of re-initializing it.
+          git clone "https://x-access-token:${PUBLISH_TOKEN}@github.com/daseinlabs/plugins.git" publish
+          cd publish
+          git config user.name "dasein-release"
+          git config user.email "release@daseinlabs.ai"
+          # Refresh the whole tree: marketplace files, plugin + binaries,
+          # install scripts. The one-line installer (`curl …/install.sh |
+          # bash`) ships beside the binaries it downloads, from the same
+          # commit, so the URL layout it assumes can never drift from the
+          # tree it lives in. install-opencode.sh is a compat stub: that
+          # URL shipped in earlier releases and must keep working. Binaries
+          # land in history on every release now (~80 MB each) — if clone
+          # size becomes a problem, squash ancient history once.
+          find . -mindepth 1 -maxdepth 1 -not -name .git -exec rm -rf {} +
+          cp -R "$GITHUB_WORKSPACE/packages/marketplace/." .
+          mkdir -p plugins
+          cp -R "$GITHUB_WORKSPACE/dist/parsec" plugins/parsec
+          install -m 755 "$GITHUB_WORKSPACE/scripts/install.sh" install.sh
+          install -m 755 "$GITHUB_WORKSPACE/scripts/install-opencode.sh" install-opencode.sh
+          install -m 644 "$GITHUB_WORKSPACE/scripts/install.ps1" install.ps1
+          # plugin.json `version` is the marketplace update channel — it
+          # advances on every release, so plugin users track latest too.
+          jq --arg v "$VERSION" '.version = $v' \
+            plugins/parsec/.claude-plugin/plugin.json > plugin.json.tmp
+          mv plugin.json.tmp plugins/parsec/.claude-plugin/plugin.json
+          # latest.json is the pollable pointer the install scripts and the
+          # future self-updater read. Both keys always advance together; the
+          # {stable, patch} shape survives only so install scripts already
+          # shipped keep parsing it.
+          [ -f latest.json ] || echo '{}' > latest.json
+          jq --slurpfile e ../entry.json '.stable = $e[0] | .patch = $e[0]' \
+            latest.json > latest.json.tmp
+          mv latest.json.tmp latest.json
+          git add -A
+          git commit -m "parsec v$VERSION"
+          git tag "v$VERSION"
+          git push origin main "v$VERSION"
+
+          # The versioned artifact store the install scripts already point
+          # at: a GitHub Release on the plugins repo itself (mirrors the one
+          # attached to this repo's tag above).
+          GH_TOKEN="$PUBLISH_TOKEN" gh release create "v$VERSION" \
+            --repo daseinlabs/plugins \
+            --title "parsec v$VERSION" \
+            --notes "see latest.json / manifest.json for sha256s" \
+            ../assets/*

@@ -1,0 +1,92 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Fork-safe by construction: nothing here reads a secret, and release.yml only
+# publishes on tags. Flags live in the Makefile so local `make check` and CI
+# cannot drift.
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  rust:
+    name: rust (fmt, clippy, test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.98.0"   # keep in step with rust-toolchain.toml
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: make fmt
+      - run: make clippy
+      - run: make rust-test
+      - name: fixtures committed
+        # Parity fixtures are the port's definition of done (DIRECTION.md §7b);
+        # an accidentally emptied fixtures dir must fail loudly, not pass vacuously.
+        run: |
+          test -n "$(ls -A packages/engine/parity/fixtures)"
+          test -n "$(ls -A packages/proxy/parity/fixtures)"
+
+  # Release-shaped build of the binary on the platforms ci.yml's Linux job
+  # cannot cover: the tray, desktop, and installer runtime code only compile
+  # here. Catches a platform break on the PR instead of on the tag.
+  build-matrix:
+    name: build (${{ matrix.platform }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            platform: darwin-arm64
+          - os: windows-latest
+            platform: win-x64
+            ext: .exe
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.98.0"
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release -p parsec-proxy
+      - run: ./target/release/parsec${{ matrix.ext }} --version
+
+  deny:
+    name: cargo deny (licenses, advisories)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check
+          arguments: --all-features
+
+  python:
+    name: python helpers (ruff, contracts)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install ruff jsonschema
+      - run: make lint-py
+      - name: contracts examples validate
+        # DIRECTION.md §8 contracts-drift: every committed example must satisfy
+        # its schema, so a schema change that orphans a producer fails here.
+        run: python scripts/check_contracts.py
+
+  # DIRECTION.md §8 invariants, each as a real job as it lands:
+  #   cache-stability-golden : packages/proxy/tests/golden_conversation.rs (in `rust`)
+  #   featurization-parity   : packages/engine/tests/parity_*.rs (in `rust`)
+  #   contracts-drift        : `python` job above
+  #   fail-open floor        : counted at runtime; not yet a CI gate

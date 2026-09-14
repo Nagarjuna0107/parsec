@@ -1,0 +1,39 @@
+[workspace]
+resolver = "2"
+members = [
+    "packages/engine",
+    "packages/proxy",
+    "packages/mapgen",
+]
+
+[workspace.package]
+version = "0.2.17"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/daseinlabs/parsec"
+rust-version = "1.98"
+
+# Shared lint policy; every crate opts in with `[lints] workspace = true`.
+# CI runs clippy with `-D warnings`, so anything warned here fails the build.
+[workspace.lints.clippy]
+dbg_macro = "warn"
+todo = "warn"
+print_stderr = "allow"
+
+[workspace.dependencies]
+# JSON key order must survive round-trips: cache-stable freezing depends on
+# byte-identical re-serialization of previously served turns (§8.1).
+serde = { version = "1", features = ["derive"] }
+# float_roundtrip: parsed floats must carry the correctly-rounded f64 (the
+# default parse is up to 1 ULP off) — fingerprint bytes depend on it.
+serde_json = { version = "1", features = ["preserve_order", "float_roundtrip"] }
+anyhow = "1"
+thiserror = "2"
+tracing = "0.1"
+# proxy data plane (DIRECTION.md §4): local axum server relaying to
+# api.anthropic.com; rustls only — no native-tls/openssl link burden in the
+# self-contained per-platform `parsec` binary.
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal"] }
+axum = "0.8"
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls", "blocking"] }
+futures-util = "0.3"

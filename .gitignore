@@ -1,0 +1,42 @@
+# Rust
+/target
+**/target/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.ruff_cache/
+.pytest_cache/
+
+# Node (opencode plugin, installer tooling)
+node_modules/
+
+# Local plugin binaries are built by `make plugin`, never committed;
+# release.yml assembles them per platform.
+packages/plugin/bin/*/
+
+# Local runtime state and captures — never commit another person's session.
+logs/
+*.log
+*.jsonl
+.parsec/
+.dasein/
+windows-install-logs/
+
+# Secrets and local overrides
+.env
+.env.*
+!.env.example
+.claude/settings.local.json
+
+# Installer build outputs
+packages/installer/**/build/
+packages/installer/**/dist/
+*.pkg
+*.dmg
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/

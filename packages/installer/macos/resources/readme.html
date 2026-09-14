@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+@STYLE@
+</style>
+</head>
+<body>
+<h1>what each choice writes</h1>
+<p class="tag">Nothing outside <code>~/.parsec</code>, the tools' own config files, and <code>/usr/local/parsec</code>.</p>
+
+<table>
+<tr><th>choice</th><th>writes</th><th>undo</th></tr>
+<tr><td>parsec</td>
+    <td><code>/usr/local/parsec/</code> · <code>~/.parsec/bin/parsec</code> · one <code># parsec</code> PATH line in your shell rc · starts the proxy</td>
+    <td><code>sudo /usr/local/parsec/uninstall.sh</code></td></tr>
+<tr><td>Claude Code</td>
+    <td>the parsec plugin via <code>claude plugin install</code> · <code>ANTHROPIC_BASE_URL</code> and a status line in <code>~/.claude/settings.json</code></td>
+    <td><code>parsec disable</code> · <code>claude plugin uninstall parsec@parsec-marketplace</code></td></tr>
+<tr><td>Codex CLI</td>
+    <td>a <code>[model_providers.parsec]</code> block in <code>~/.codex/config.toml</code> (subscription mode; for an API key run <code>parsec setup codex --byok</code> afterwards)</td>
+    <td><code>parsec disable codex</code></td></tr>
+<tr><td>opencode</td>
+    <td>the parsec plugin shim in opencode's config directory</td>
+    <td><code>parsec disable opencode</code></td></tr>
+<tr><td>Claude Desktop</td>
+    <td>mitmproxy via Homebrew · its CA in the System keychain · <code>~/.parsec/interceptor/</code> · an <code>mcpServers.parsec</code> entry in Claude Desktop's config · two LaunchAgents (interceptor + proxy)</td>
+    <td><code>parsec disable desktop</code> (prints the CA removal command)</td></tr>
+<tr><td>Menu-bar app</td>
+    <td><code>~/Library/Application Support/parsec/parsec.app</code> · a LaunchAgent</td>
+    <td><code>parsec tray uninstall</code></td></tr>
+</table>
+
+<h2>claude desktop, in detail</h2>
+<p>Desktop has no endpoint setting, so parsec reaches it by process-scoped TLS interception. Only Cowork / Agent mode and the model list are routed; normal chat, login, and the Cowork bridge pass straight through. Your credentials are forwarded verbatim — the proxy adds no auth header.</p>
+<p class="warn">If Homebrew has to install mitmproxy, "Running package scripts…" can sit for a few minutes. That is expected.</p>
+<p>The one step macOS will not let an installer do: <strong>System Settings → General → Login Items &amp; Extensions → Network Extensions → Mitmproxy Redirector → on</strong>. The menu-bar app waits for it and starts intercepting the moment it flips. Then quit Claude Desktop completely (⌘Q) and reopen it.</p>
+
+<h2>requirements</h2>
+<ul>
+  <li>Apple silicon, macOS 13 or later</li>
+  <li>Claude Code, Codex, or opencode already installed for their choices (a missing tool is skipped and noted, never an error)</li>
+  <li>Homebrew, for the Claude Desktop choice</li>
+</ul>
+</body>
+</html>

@@ -1,0 +1,146 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  productbuild distribution for parsec-<version>-macos-arm64.pkg.
+  @VERSION@ is substituted by build.sh. Choices run in outline order: core
+  first (the binary every other component calls), the menu-bar app after
+  desktop (it picks up the approval marker that component may leave), and
+  the hidden sign-in step last, so the browser tab it opens coincides with
+  the conclusion pane rather than interrupting "Installing".
+-->
+<installer-gui-script minSpecVersion="2">
+  <title>parsec</title>
+  <organization>rocks.dasein</organization>
+  <!-- customize="always": the choices pane is the install UI, so it is never
+       skipped. rootVolumeOnly + localSystem: one Installer authentication,
+       root postinstalls — which is what lets the CA land without a sudo
+       prompt (see scripts/desktop/postinstall). -->
+  <options customize="always" require-scripts="true" rootVolumeOnly="true" hostArchitectures="arm64"/>
+  <domains enable_localSystem="true"/>
+  <allowed-os-versions>
+    <os-version min="13.0"/>
+  </allowed-os-versions>
+
+  <welcome file="welcome.html" mime-type="text/html"/>
+  <readme file="readme.html" mime-type="text/html"/>
+  <license file="license.txt" mime-type="text/plain"/>
+  <conclusion file="conclusion.html" mime-type="text/html"/>
+  <!-- The parallax mark in the sidebar slot: brand green #2FA317 on the light
+       pane (BRANDING §1), the phosphor glow on dark. -->
+  <background file="background.png" mime-type="image/png" alignment="bottomleft" scaling="none"/>
+  <background-darkAqua file="background-dark.png" mime-type="image/png" alignment="bottomleft" scaling="none"/>
+
+  <script><![CDATA[
+    // Runs in Installer.app as the logged-in user, before authentication —
+    // so system.env.HOME is the right home to probe.
+    function home() {
+      return system.env.HOME || ('/Users/' + system.env.USER);
+    }
+    function anyPath(paths) {
+      for (var i = 0; i < paths.length; i++) {
+        if (system.files.fileExistsAtPath(paths[i])) return true;
+      }
+      return false;
+    }
+    function hasClaudeCode() {
+      return anyPath([
+        home() + '/.claude',
+        home() + '/.claude/local/claude',
+        home() + '/.local/bin/claude',
+        '/opt/homebrew/bin/claude',
+        '/usr/local/bin/claude'
+      ]);
+    }
+    function hasCodex() {
+      return anyPath([
+        home() + '/.codex',
+        home() + '/.local/bin/codex',
+        '/opt/homebrew/bin/codex',
+        '/usr/local/bin/codex'
+      ]);
+    }
+    function hasOpencode() {
+      return anyPath([home() + '/.config/opencode', home() + '/.opencode']);
+    }
+    function hasDesktop() {
+      return anyPath(['/Applications/Claude.app', home() + '/Applications/Claude.app']);
+    }
+    function installCheck() {
+      // Only an arm64 binary is published (release.yml).
+      if (system.sysctl('hw.optional.arm64') != '1') {
+        my.result.title = 'Apple silicon required';
+        my.result.message = 'This build of parsec runs on Apple silicon Macs only.';
+        my.result.type = 'Fatal';
+        return false;
+      }
+      return true;
+    }
+  ]]></script>
+  <installation-check script="installCheck()"/>
+
+  <choices-outline>
+    <line choice="core"/>
+    <line choice="claude"/>
+    <line choice="codex"/>
+    <line choice="opencode"/>
+    <line choice="desktop"/>
+    <line choice="tray"/>
+    <line choice="signin"/>
+  </choices-outline>
+
+  <choice id="core" title="parsec"
+          description="The parsec binary: /usr/local/parsec, a copy at ~/.parsec/bin/parsec, and a PATH line in your shell rc. Starts the local proxy. Required."
+          start_selected="true" start_enabled="false" visible="true">
+    <pkg-ref id="rocks.dasein.parsec.core"/>
+  </choice>
+
+  <choice id="claude" title="Claude Code"
+          description="Installs the parsec plugin (status line, hooks, skills) through the claude CLI and points ANTHROPIC_BASE_URL in ~/.claude/settings.json at the local proxy. Undo: parsec disable · claude plugin uninstall parsec@parsec-marketplace."
+          start_selected="hasClaudeCode()">
+    <pkg-ref id="rocks.dasein.parsec.claude"/>
+  </choice>
+
+  <choice id="codex" title="Codex CLI"
+          description="Routes Codex through the local proxy (ChatGPT-subscription mode). For an OPENAI_API_KEY provider instead, run parsec setup codex --byok afterwards. Undo: parsec disable codex."
+          start_selected="hasCodex()">
+    <pkg-ref id="rocks.dasein.parsec.codex"/>
+  </choice>
+
+  <choice id="opencode" title="opencode"
+          description="Installs the parsec plugin shim for opencode (Anthropic API-key providers). Undo: parsec disable opencode."
+          start_selected="hasOpencode()">
+    <pkg-ref id="rocks.dasein.parsec.opencode"/>
+  </choice>
+
+  <choice id="desktop" title="Claude Desktop"
+          description="Process-scoped TLS interception of Cowork / Agent mode. Installs mitmproxy (Homebrew), trusts its CA in the System keychain (done with the password you already entered), and registers the interceptor to start at login. macOS then needs one toggle from you, which the menu-bar app waits for. Undo: parsec disable desktop."
+          start_selected="hasDesktop()">
+    <pkg-ref id="rocks.dasein.parsec.desktop"/>
+  </choice>
+
+  <choice id="tray" title="Menu-bar app"
+          description="Live proxy / Desktop / savings status in the menu bar, and the guided completion of the Claude Desktop approval. Starts at login. Undo: parsec tray uninstall."
+          start_selected="hasDesktop()"
+          selected="choices.desktop.selected || choices.tray.selected"
+          enabled="!choices.desktop.selected">
+    <pkg-ref id="rocks.dasein.parsec.tray"/>
+  </choice>
+
+  <!-- Not a choice: the install ends with the browser sign-in handoff
+       (scripts/signin/postinstall), which skips itself on an upgrade or
+       under PARSEC_NO_LOGIN=1. Hidden so the choices pane stays the five
+       real decisions; last so the tab opens with the conclusion pane. -->
+  <choice id="signin" title="Sign in"
+          description="Opens https://app.getparsec.ai in your browser to hand this machine its dashboard key."
+          start_selected="true" start_enabled="false" visible="false">
+    <pkg-ref id="rocks.dasein.parsec.signin"/>
+  </choice>
+
+  <pkg-ref id="rocks.dasein.parsec.core" version="@VERSION@" onConclusion="none">core.pkg</pkg-ref>
+  <pkg-ref id="rocks.dasein.parsec.claude" version="@VERSION@" onConclusion="none">claude.pkg</pkg-ref>
+  <pkg-ref id="rocks.dasein.parsec.codex" version="@VERSION@" onConclusion="none">codex.pkg</pkg-ref>
+  <pkg-ref id="rocks.dasein.parsec.opencode" version="@VERSION@" onConclusion="none">opencode.pkg</pkg-ref>
+  <pkg-ref id="rocks.dasein.parsec.desktop" version="@VERSION@" onConclusion="none">desktop.pkg</pkg-ref>
+  <pkg-ref id="rocks.dasein.parsec.tray" version="@VERSION@" onConclusion="none">tray.pkg</pkg-ref>
+  <pkg-ref id="rocks.dasein.parsec.signin" version="@VERSION@" onConclusion="none">signin.pkg</pkg-ref>
+  <product id="rocks.dasein.parsec" version="@VERSION@"/>
+</installer-gui-script>

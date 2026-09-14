@@ -1,0 +1,60 @@
+#!/bin/bash
+# Core component: the payload (/usr/local/parsec) is already on disk. Give
+# the console user a callable `parsec` and a live proxy.
+set -uo pipefail
+cd "$(dirname "$0")" || exit 0
+. ./lib.sh
+if ! init_user; then
+  log "core: no console user — /usr/local/parsec is installed; run '/usr/local/parsec/bin/parsec setup' as the user"
+  exit 0
+fi
+log "core: user=$USER_NAME home=$USER_HOME"
+VERSION="$(cat /usr/local/parsec/VERSION 2>/dev/null || echo unknown)"
+
+# Fresh summary per install run.
+run_as_user mkdir -p "$USER_HOME/.parsec/bin"
+run_as_user rm -f "$SUMMARY"
+
+# ~/.parsec/bin/parsec is the path every shim, hook, and skill probes. A COPY,
+# not a symlink into /usr/local: the plugin's alias refresh keeps a real file
+# that is newer than its own build (setup_opencode.rs alias_is_newer_build)
+# but would replace a symlink it did not make. Fresh inode + rename: an
+# in-place overwrite trips the code-sign cache (SIGKILL on next exec).
+tmp="$USER_HOME/.parsec/bin/parsec.pkg-tmp.$$"
+if cp "$PAYLOAD_BIN" "$tmp" && chown "$USER_NAME" "$tmp" && chmod 755 "$tmp" && mv -f "$tmp" "$PARSEC"; then
+  log "core: installed $PARSEC"
+else
+  rm -f "$tmp"
+  write_summary core "could not place $PARSEC — copy it by hand: cp $PAYLOAD_BIN $PARSEC"
+  exit 0
+fi
+if ! run_as_user "$PARSEC" --version; then
+  write_summary core "$PARSEC does not run — see /var/log/install.log"
+  exit 0
+fi
+
+add_path_line
+
+# A proxy that predates this install keeps serving the OLD binary; restart so
+# the fresh one owns the port (identity-checked — never kills a stranger).
+if run_as_user "$PARSEC" up --restart; then
+  log "core: proxy restarted on the new binary"
+else
+  write_summary core "proxy did not restart — run: parsec up --restart"
+fi
+# Upgrade over an installed menu-bar app: its bundle holds a COPY of the
+# binary (tray/macos.rs), so without this a tray that was not re-chosen keeps
+# running the previous release until the next login — with that release's
+# bugs. `tray install` re-copies and restarts it. The tray component, when
+# chosen, does the same again later; a second restart is cheap.
+if [ -f "$USER_HOME/Library/LaunchAgents/rocks.dasein.parsec.tray.plist" ]; then
+  if run_as_user "$PARSEC" tray install; then
+    log "core: menu-bar app refreshed to $VERSION"
+  else
+    write_summary core "menu-bar app still runs the previous version — run: parsec tray install"
+  fi
+fi
+append_as_user "$SUMMARY" "installed parsec $VERSION → $PARSEC"$'\n'
+# Sign-in (the browser handoff) is the `signin` component, last in the
+# outline, so the tab opens as the wizard reaches its conclusion pane.
+exit 0

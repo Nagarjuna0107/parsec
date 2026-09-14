@@ -1,0 +1,81 @@
+#!/bin/bash
+# Claude Desktop component — the one that needs privilege, and the reason the
+# permissions live inside the install flow:
+#
+#   1. mitmproxy (Homebrew, as the user)                       user
+#   2. parsec setup desktop --prepare --autostart               user
+#      CA generated · addon · MCP entry · proxy warm ·
+#      Network Extension registered · System Settings opened ·
+#      marker left for the menu-bar app
+#   3. trust the CA in the System keychain                      ROOT — no sudo,
+#      no prompt: Installer already authenticated              no dialog
+#   4. extension already approved (upgrade)? finish now         user
+#      otherwise the tray (installed next) waits for the toggle
+#
+# Never fails the install: Desktop is an extra, and every miss is a line in
+# ~/.parsec/install-summary.txt with the command that fixes it.
+set -uo pipefail
+cd "$(dirname "$0")" || exit 0
+. ./lib.sh
+init_user || exit 0
+log "desktop: user=$USER_NAME"
+
+# 1. mitmproxy. brew refuses to run as root, so this is the user's brew.
+MITM="$(run_as_user sh -c 'command -v mitmdump' 2>/dev/null || true)"
+if [ -z "$MITM" ]; then
+  BREW="$(run_as_user sh -c 'command -v brew' 2>/dev/null || true)"
+  if [ -n "$BREW" ]; then
+    log "desktop: installing mitmproxy via brew (this can take a few minutes)"
+    run_as_user "$BREW" install mitmproxy || log "desktop: brew install mitmproxy failed"
+    MITM="$(run_as_user sh -c 'command -v mitmdump' 2>/dev/null || true)"
+  fi
+fi
+if [ -z "$MITM" ]; then
+  write_summary desktop "mitmproxy missing — brew install mitmproxy, then: parsec setup desktop --install-ca --autostart"
+  exit 0
+fi
+log "desktop: mitmdump at $MITM"
+
+# 2. Everything up to the approval gate, as the user. Exit 0 by contract; the
+#    last line is the machine-readable report.
+LOG="$USER_HOME/.parsec/installer.log"
+OUT="$(run_as_user "$PARSEC" setup desktop --prepare --autostart 2>&1 || true)"
+append_as_user "$LOG" "$OUT"$'\n'
+REPORT="$(printf '%s\n' "$OUT" | grep '^PARSEC_DESKTOP_PREPARE ' | tail -1)"
+log "desktop: $REPORT"
+
+# 3. Trust the CA — as root, directly. This is the exact command `parsec
+#    setup desktop --install-ca` runs behind `sudo` (setup_desktop.rs
+#    install_ca_now), minus the sudo, because Installer.app already holds
+#    root. `parsec desktop status` reads it back by SHA-1 fingerprint.
+CA="$USER_HOME/.mitmproxy/mitmproxy-ca-cert.pem"
+if [ -f "$CA" ]; then
+  if /usr/bin/security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain "$CA"; then
+    log "desktop: CA trusted in the System keychain"
+  else
+    write_summary desktop "CA not trusted — run: sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain $CA"
+  fi
+else
+  write_summary desktop "mitmproxy's CA was not generated — run: parsec setup desktop --install-ca --autostart"
+fi
+
+# 4. Upgrade path: the extension is already approved on this machine, so the
+#    interceptor and its boot services can start right now. Otherwise the
+#    tray component picks the marker up and waits for the toggle.
+case "$REPORT" in
+  *'"extension":"ready"'*)
+    if run_as_user "$PARSEC" setup desktop --autostart; then
+      log "desktop: interceptor running"
+      append_as_user "$SUMMARY" "desktop: intercepting — quit (⌘Q) and reopen Claude Desktop"$'\n'
+    else
+      write_summary desktop "interceptor did not start — run: parsec setup desktop --autostart"
+    fi
+    ;;
+  *'"marker":true'*)
+    append_as_user "$SUMMARY" "desktop: one toggle left — System Settings → General → Login Items & Extensions → Network Extensions → Mitmproxy Redirector ON. The parsec menu-bar mark is waiting for it."$'\n'
+    ;;
+  *)
+    write_summary desktop "not finished — run: parsec setup desktop --autostart (details: $LOG)"
+    ;;
+esac
+exit 0

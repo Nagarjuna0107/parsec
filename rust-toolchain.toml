@@ -1,0 +1,5 @@
+# Pinned so contributors, pre-commit, and CI run the same compiler.
+# Bump deliberately; keep `rust-version` in Cargo.toml in step.
+[toolchain]
+channel = "1.98.0"
+components = ["rustfmt", "clippy"]

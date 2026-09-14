@@ -1,0 +1,13 @@
+#!/bin/bash
+# Codex CLI component: ChatGPT-subscription routing through the local proxy.
+# API-key mode is `parsec setup codex --byok` (documented in the readme pane).
+set -uo pipefail
+cd "$(dirname "$0")" || exit 0
+. ./lib.sh
+init_user || exit 0
+if run_as_user "$PARSEC" setup codex; then
+  log "codex: configured"
+else
+  write_summary codex "setup failed — run: parsec setup codex"
+fi
+exit 0

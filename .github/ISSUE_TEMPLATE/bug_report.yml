@@ -1,0 +1,48 @@
+name: Bug report
+description: Something in parsec misbehaved
+labels: ["bug"]
+body:
+  - type: input
+    id: version
+    attributes:
+      label: parsec version
+      description: Output of `parsec --version`
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - macOS (Apple Silicon)
+        - macOS (Intel)
+        - Linux
+        - Windows
+    validations:
+      required: true
+  - type: dropdown
+    id: harness
+    attributes:
+      label: Harness
+      options:
+        - Claude Code
+        - OpenCode
+        - Codex CLI
+        - Claude Desktop
+        - Other
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, what you saw instead.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: >
+        Relevant lines from `~/.parsec/proxy.log`. Please redact anything
+        private; the proxy log does not contain your API key but may contain
+        file paths.
+      render: text

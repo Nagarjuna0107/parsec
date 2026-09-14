@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+@STYLE@
+</style>
+</head>
+<body>
+<img class="mark mark-light" src="mark-light.png" alt="">
+<img class="mark mark-dark" src="mark-dark.png" alt="">
+<h1>installed</h1>
+<p class="tag">The proxy is running. Anything that still needs you is listed in <code>~/.parsec/install-summary.txt</code>.</p>
+
+<h2>next</h2>
+<ul>
+  <li><strong>Claude Code</strong> — start a new session. Routing is read at session start, so open sessions keep going direct until restarted.</li>
+  <li><strong>Codex / opencode</strong> — restart them; every session routes through parsec.</li>
+  <li><strong>Claude Desktop</strong> — if System Settings opened, flip <strong>Mitmproxy Redirector</strong> on (General → Login Items &amp; Extensions → Network Extensions). The parsec mark in your menu bar is waiting for it. Then quit Claude Desktop completely (⌘Q) and reopen it.</li>
+</ul>
+
+<h2>sign in</h2>
+<p>A browser tab just opened at <code>https://app.getparsec.ai</code> — sign in and click <strong>Connect</strong>. That hands this machine its dashboard key; nothing to type.</p>
+<p class="muted">No tab? Click <strong>Sign in to parsec…</strong> in the menu-bar app, or run <code>parsec login</code> in a terminal.</p>
+
+<h2>check</h2>
+<p><code>parsec desktop status</code> · <code>parsec savings</code> · the menu-bar mark</p>
+
+<p class="muted">Undo: <code>parsec disable &lt;tool&gt;</code> · <code>parsec tray uninstall</code> · <code>sudo /usr/local/parsec/uninstall.sh</code></p>
+</body>
+</html>

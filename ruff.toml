@@ -1,0 +1,9 @@
+# Python helpers only: parity fixture generators, the mock upstream, and the
+# mitmproxy addon. There is no Python package in this repo.
+target-version = "py311"
+line-length = 100
+extend-exclude = ["packages/plugin/bin"]
+
+[lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+ignore = ["E501", "B905"]  # generators mirror the Python reference source verbatim

@@ -1,0 +1,41 @@
+#!/bin/bash
+# Claude Code component: the plugin (status line, hooks, skills) through the
+# `claude` CLI, then routing in ~/.claude/settings.json via `parsec setup`.
+set -uo pipefail
+cd "$(dirname "$0")" || exit 0
+. ./lib.sh
+init_user || exit 0
+MARKETPLACE_URL="${PARSEC_MARKETPLACE_URL:-https://github.com/daseinlabs/plugins}"
+
+# USER_PATH is a fixed list (lib.sh), so a CLI that lives under a version
+# manager is invisible to `command -v`: probe those homes directly, newest
+# node first for nvm.
+CLAUDE="$(run_as_user sh -c 'command -v claude' 2>/dev/null || true)"
+if [ -z "$CLAUDE" ]; then
+  for cand in "$USER_HOME/.claude/local/claude" "$USER_HOME/.volta/bin/claude" \
+              "$USER_HOME/.local/share/fnm/aliases/default/bin/claude" \
+              $(ls -d "$USER_HOME"/.nvm/versions/node/*/bin/claude 2>/dev/null | sort -V -r); do
+    if [ -x "$cand" ]; then CLAUDE="$cand"; break; fi
+  done
+fi
+if [ -n "$CLAUDE" ]; then
+  log "claude: cli at $CLAUDE"
+  # marketplace add is idempotent-ish — tolerate "already added" and let
+  # install be the arbiter.
+  run_as_user "$CLAUDE" plugin marketplace add "$MARKETPLACE_URL" || log "claude: marketplace already added"
+  if run_as_user "$CLAUDE" plugin install parsec@parsec-marketplace; then
+    log "claude: plugin installed"
+  else
+    write_summary claude "plugin install failed — run: claude plugin marketplace add $MARKETPLACE_URL && claude plugin install parsec@parsec-marketplace"
+  fi
+else
+  write_summary claude "claude CLI not found — after installing Claude Code: claude plugin marketplace add $MARKETPLACE_URL && claude plugin install parsec@parsec-marketplace"
+fi
+
+# Routing env + status line + warm proxy. Needs no CLI, so it runs either way.
+if run_as_user "$PARSEC" setup; then
+  log "claude: routing written"
+else
+  write_summary claude "routing not written — run: parsec setup"
+fi
+exit 0

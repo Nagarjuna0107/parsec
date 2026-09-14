@@ -1,0 +1,15 @@
+#!/bin/bash
+# Menu-bar app: status, and the guided completion of the Claude Desktop
+# approval. Runs after the desktop component in the choices outline so it
+# can see the marker that component leaves; on its first tick it starts
+# waiting with no click. Only the hidden sign-in step comes after it.
+set -uo pipefail
+cd "$(dirname "$0")" || exit 0
+. ./lib.sh
+init_user || exit 0
+if run_as_user "$PARSEC" tray install; then
+  log "tray: installed and started"
+else
+  write_summary tray "menu-bar app not installed — run: parsec tray install"
+fi
+exit 0

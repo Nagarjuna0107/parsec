@@ -1,0 +1,21 @@
+[package]
+name = "parsec-mapgen"
+description = "mapgen's deterministic core as MCP tools: repo map, file outlines, symbol lookup with key lines. Backs the parsec:explore agent (free tier)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+parsec-engine = { path = "../engine" }
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+regex = "1"
+tree-sitter = "0.25"
+# .gitignore-aware repo walking
+ignore = "0.4"
+
+[lints]
+workspace = true

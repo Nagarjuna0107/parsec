@@ -1,0 +1,34 @@
+#!/bin/bash
+# Sign-in component: LAST in the choices outline, so the browser tab opens
+# as Installer.app turns to its conclusion pane ("a browser tab just
+# opened…") rather than twenty seconds earlier, mid-install, with the wizard
+# still on "Installing" and nothing on screen explaining the tab.
+#
+# A fresh machine has no dashboard key; open the browser handoff
+# (`parsec login`, packages/proxy/src/login.rs) as the console user so the
+# install ends signed in, with nothing to type. Needs a GUI session to open
+# a browser in; an upgrade (key present) or PARSEC_NO_LOGIN=1 (CI) skips
+# it. The menu-bar app's "Sign in" item and `parsec login` cover every
+# other case. Hidden + always selected in Distribution.xml: it is not a
+# choice, it is how the install ends.
+set -uo pipefail
+cd "$(dirname "$0")" || exit 0
+. ./lib.sh
+init_user || exit 0
+if [ ! -x "$PARSEC" ]; then
+  log "signin: $PARSEC missing (core did not complete) — skipping"
+  exit 0
+fi
+if [ -f "$USER_HOME/.parsec/credentials.json" ] || [ "${PARSEC_NO_LOGIN:-0}" = 1 ]; then
+  log "signin: already signed in or PARSEC_NO_LOGIN=1 — skipping"
+  exit 0
+fi
+if gui_session_available; then
+  run_as_user touch "$USER_HOME/.parsec/login.log"
+  spawn_as_user "$USER_HOME/.parsec/login.log" "$PARSEC" login --timeout 600
+  log "signin: browser handoff opened (log: ~/.parsec/login.log)"
+  append_as_user "$SUMMARY" "sign in: a browser tab opened at https://app.getparsec.ai — click Connect. No tab? run: parsec login"$'\n'
+else
+  write_summary signin "not signed in (no GUI session) — run: parsec login"
+fi
+exit 0

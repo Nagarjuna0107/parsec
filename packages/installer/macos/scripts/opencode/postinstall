@@ -1,0 +1,12 @@
+#!/bin/bash
+# opencode component: the parsec plugin shim.
+set -uo pipefail
+cd "$(dirname "$0")" || exit 0
+. ./lib.sh
+init_user || exit 0
+if run_as_user "$PARSEC" setup opencode; then
+  log "opencode: configured"
+else
+  write_summary opencode "setup failed — run: parsec setup opencode"
+fi
+exit 0

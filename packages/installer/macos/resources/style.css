@@ -1,0 +1,56 @@
+/* Shared by the welcome/readme/conclusion panes. Inlined into each HTML file
+   by build.sh (Installer.app loads no external resources).
+
+   Brand (brand/parsecbrandkit/BRANDING.md): monospace identity, brand green
+   #2FA317 on the light pane, phosphor #4AF626 on dark — Installer owns the
+   pane background, so nothing here paints one. */
+body {
+  margin: 0 12px;
+  font-family: "JetBrains Mono", "SF Mono", Menlo, monospace;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #0c1410;
+}
+h1 {
+  font-size: 20px;
+  font-weight: 800;
+  margin: 8px 0 2px;
+  color: #2fa317;
+}
+h2 {
+  font-size: 13px;
+  font-weight: 700;
+  margin: 18px 0 4px;
+  letter-spacing: 0.04em;
+  text-transform: lowercase;
+  color: #2fa317;
+}
+p { margin: 6px 0; }
+.tag { color: #516358; margin-bottom: 14px; }
+.stat { color: #2fa317; font-weight: 700; }
+code, kbd {
+  font-family: inherit;
+  font-size: 12px;
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: rgba(23, 131, 58, 0.10);
+}
+ul { padding-left: 18px; margin: 4px 0; }
+li { margin: 3px 0; }
+table { border-collapse: collapse; width: 100%; font-size: 12px; margin: 6px 0; }
+th, td { text-align: left; vertical-align: top; padding: 4px 6px; border-bottom: 1px solid #dce6de; }
+th { color: #516358; font-weight: 500; }
+.muted { color: #516358; }
+.mark { height: 56px; margin: 4px 0 0 -8px; }
+.mark-dark { display: none; }
+.warn { color: #b7791f; }
+@media (prefers-color-scheme: dark) {
+  body { color: #d7fbe4; }
+  h1, h2, .stat { color: #4af626; }
+  .tag, th, .muted { color: #8ca897; }
+  code, kbd { background: rgba(74, 246, 38, 0.12); }
+  th, td { border-bottom-color: #1d2a22; }
+  .mark-light { display: none; }
+  .mark-dark { display: inline; }
+  .warn { color: #ffb84d; }
+}
