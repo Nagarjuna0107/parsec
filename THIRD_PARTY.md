@@ -22,11 +22,29 @@ installers under the OFL; the license text ships beside them at
 
 `CODE_OF_CONDUCT.md` is adapted from Contributor Covenant 2.1.
 
+## bge-large-en-v1.5 (MIT)
+
+The scoring service embeds with
+[BAAI/bge-large-en-v1.5](https://huggingface.co/BAAI/bge-large-en-v1.5)
+(Beijing Academy of Artificial Intelligence, MIT). The weights are downloaded
+at build or first run, never redistributed from this repository.
+
 ## Rust and Python dependencies
 
 Crate licenses are enforced in CI by `cargo deny` against the allow list in
 `deny.toml`. Python helpers (parity generators, the mock upstream, the
 mitmproxy addon) use only the standard library plus what their headers import.
+The scoring service (`packages/brain`) depends on PyTorch (BSD-3), PyTorch
+Geometric (MIT), FastAPI (MIT), tree-sitter and its language pack (MIT), and
+`huggingface_hub` (Apache-2.0); see its `pyproject.toml`. The modules under
+`packages/brain/src/parsec_brain/vendored/` are first-party code copied from
+the reference implementation, not third-party work.
+
+## Curator checkpoints
+
+The trained curator model is not part of this repository. The base checkpoint
+is published on the Hugging Face Hub under its own model license; `PARSEC_CKPT`
+tells the scoring service where to load it from.
 
 ## Trademarks
 

@@ -1,0 +1,167 @@
+# Build + deploy the scoring service to Google Cloud Run. One worked deploy
+# recipe for people who want a managed host; the Dockerfile itself is
+# platform-neutral (docker run / compose / k8s all work — see README.md).
+#
+#   gcloud builds submit packages/brain \
+#     --config packages/brain/cloudbuild.yaml \
+#     --substitutions=_REGION=us-central1,_REPO=parsec,_SERVICE=parsec-brain,\
+# _CKPT_SRC=hf://<org>/<repo>/<checkpoint>.pt
+#
+# The build context is packages/brain (see the submit path). The checkpoint is
+# fetched INTO that context so the Docker COPY bakes it — the image digest
+# then pins the exact bundle version (determinism-honest deploy).
+
+substitutions:
+  _REGION: us-central1
+  _REPO: parsec                 # Artifact Registry repo (create once: gcloud artifacts repositories create)
+  _SERVICE: parsec-brain
+  # Where the curator checkpoint comes from. Three forms:
+  #   hf://<org>/<repo>/<file>   the Hugging Face Hub (the released base model)
+  #   gs://bucket/path/file.pt   a GCS mirror you own
+  #   https://…/file.pt          any plain URL
+  _CKPT_SRC: ''
+  # Embedder backend:
+  #   local  — in-process bge-large (single hop; the recommended deploy).
+  #            Bakes the weights + builds CUDA torch + deploys with an L4 GPU.
+  #   remote — real bge vectors via an external _EMBED_URL you operate (needs
+  #            a VPC connector if it is private; CPU service).
+  #   hash   — deterministic TEST vectors (validates the pipeline, NOT scores).
+  _EMBED_BACKEND: local
+  _EMBED_URL: ''
+  # HF id or GCS prefix of the bge weights to bake (local backend only). An HF
+  # id downloads at build; a gs:// prefix `gcloud storage cp`s a mirror.
+  _EMBED_MODEL: BAAI/bge-large-en-v1.5
+  # _GPU=true attaches an L4 + builds cu121 torch; false runs the local embedder
+  # on CPU (slower, but no GPU quota needed — the safe first deploy). The 'local'
+  # backend works either way (torch auto-falls-back to CPU when no GPU present).
+  _GPU: 'false'
+  # Serving shape: single-threaded scorer -> concurrency 1, scale horizontally.
+  # min-instances 1 keeps a warm instance so the proxy path never eats a cold start.
+  _CONCURRENCY: '1'
+  _CPU: '4'
+  _MEMORY: 4Gi
+  _MIN_INSTANCES: '1'
+  _MAX_INSTANCES: '10'
+  _TIMEOUT: '120'
+  # Optional Secret Manager secret holding the bearer key (name:version), e.g.
+  # parsec-brain-key:latest. Empty = no static-key gate (fine behind an authed edge).
+  _BRAIN_KEY_SECRET: ''
+  # Optional per-user entitlement gate: a platform base URL the service
+  # validates psc_ keys against (/keys/validate). Empty = the static
+  # _BRAIN_KEY_SECRET gate (or open). Self-hosters normally leave this empty.
+  _PLATFORM_URL: ''
+
+steps:
+  # 1. Fetch the checkpoint into the build context so the Dockerfile bakes it.
+  - id: fetch-checkpoint
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        [ -n "$_CKPT_SRC" ] || { echo "set _CKPT_SRC (hf://, gs:// or https://)"; exit 1; }
+        echo "fetching $_CKPT_SRC -> bundle/curator_v4_prod.pt"
+        case "$_CKPT_SRC" in
+          gs://*)  gcloud storage cp "$_CKPT_SRC" bundle/curator_v4_prod.pt ;;
+          hf://*)  REF="$${_CKPT_SRC#hf://}"; REPO="$${REF%/*}"; FILE="$${REF##*/}"
+                   apt-get update -qq && apt-get install -y -qq python3-pip >/dev/null
+                   pip3 install --no-cache-dir -q --break-system-packages "huggingface_hub>=0.23"
+                   python3 -c "from huggingface_hub import hf_hub_download; import shutil; \
+                     shutil.copy(hf_hub_download('$${REPO}', '$${FILE}'), 'bundle/curator_v4_prod.pt')" ;;
+          *)       curl -fsSL "$_CKPT_SRC" -o bundle/curator_v4_prod.pt ;;
+        esac
+        ls -lh bundle/
+
+  # 1b. Bake the bge weights into embed-model/ for the 'local' backend (fast
+  #     cold start: baked ~5s vs 60-180s pulling at boot). Skipped otherwise.
+  - id: fetch-embed-model
+    name: python:3.12-slim
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        if [ "$_EMBED_BACKEND" != "local" ]; then echo "backend=$_EMBED_BACKEND — no model bake"; exit 0; fi
+        case "$_EMBED_MODEL" in
+          gs://*) apt-get update -qq && apt-get install -y -qq curl >/dev/null
+                  curl -sSL https://sdk.cloud.google.com | bash >/dev/null 2>&1
+                  gcloud storage cp -r "$_EMBED_MODEL/*" embed-model/ ;;
+          *)      pip install --no-cache-dir -q "huggingface_hub>=0.23"
+                  python -c "from huggingface_hub import snapshot_download; \
+                    snapshot_download('$_EMBED_MODEL', local_dir='embed-model', \
+                    allow_patterns=['*.json','*.txt','*.safetensors','*.model'])" ;;
+        esac
+        ls -lh embed-model/
+
+  # 2. Build. TORCH_INDEX picks CPU vs cu121 (GPU); EMBED_EXTRAS omitted for
+  #    hash to keep that image lean. bundle/ + embed-model/ are baked here.
+  - id: build
+    name: gcr.io/cloud-builders/docker
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        # $$ = a shell var (Cloud Build reads a single $ as a build substitution).
+        EXTRAS="transformers>=4.40,<5 safetensors"
+        [ "$_EMBED_BACKEND" = "hash" ] && EXTRAS=""
+        IDX="https://download.pytorch.org/whl/cpu"
+        [ "$_GPU" = "true" ] && IDX="https://download.pytorch.org/whl/cu121"
+        docker build \
+          --build-arg "TORCH_INDEX=$${IDX}" \
+          --build-arg "EMBED_EXTRAS=$${EXTRAS}" \
+          -t "$_REGION-docker.pkg.dev/$PROJECT_ID/$_REPO/$_SERVICE:$BUILD_ID" \
+          -t "$_REGION-docker.pkg.dev/$PROJECT_ID/$_REPO/$_SERVICE:latest" \
+          .
+
+  # 3. Push both tags.
+  - id: push
+    name: gcr.io/cloud-builders/docker
+    args: [push, --all-tags, $_REGION-docker.pkg.dev/$PROJECT_ID/$_REPO/$_SERVICE]
+
+  # 4. Deploy to Cloud Run. Env stays minimal — _flags.py setdefault-pins the
+  #    shape-critical knobs (AC_CHUNK_LINES etc.); PARSEC_SERVE_TAU is left
+  #    UNSET so serving uses the checkpoint's calibrated tau, not a forced one.
+  - id: deploy
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        FLAGS=(
+          --image "$_REGION-docker.pkg.dev/$PROJECT_ID/$_REPO/$_SERVICE:$BUILD_ID"
+          --region "$_REGION"
+          --platform managed
+          --port 8080
+          --concurrency "$_CONCURRENCY"
+          --min-instances "$_MIN_INSTANCES"
+          --max-instances "$_MAX_INSTANCES"
+          --timeout "$_TIMEOUT"
+          --set-env-vars "PARSEC_EMBED_BACKEND=$_EMBED_BACKEND"
+          --set-env-vars "PARSEC_TORCH_THREADS=$_CPU"
+          --allow-unauthenticated
+        )
+        # Local backend loads the baked weights from /embed-model either way.
+        [ "$_EMBED_BACKEND" = "local" ] && FLAGS+=(--set-env-vars "PARSEC_EMBED_MODEL_DIR=/embed-model")
+        if [ "$_GPU" = "true" ]; then
+          # In-process bge on an L4: attach the GPU, disable CPU throttling so the
+          # model stays resident. L4 requires >=4 CPU / 16 GiB, pinned here.
+          # --no-gpu-zonal-redundancy uses the default (quota-free) GPU tier;
+          # zonal redundancy is a separate higher quota (g.co/cloudrun/gpu-quota).
+          FLAGS+=(--gpu 1 --gpu-type nvidia-l4 --no-gpu-zonal-redundancy --no-cpu-throttling --cpu 4 --memory 16Gi)
+        else
+          FLAGS+=(--cpu "$_CPU" --memory "$_MEMORY")
+        fi
+        [ -n "$_EMBED_URL" ]         && FLAGS+=(--set-env-vars "PARSEC_EMBED_URL=$_EMBED_URL")
+        [ -n "$_PLATFORM_URL" ]      && FLAGS+=(--set-env-vars "PARSEC_PLATFORM_URL=$_PLATFORM_URL")
+        [ -n "$_BRAIN_KEY_SECRET" ]  && FLAGS+=(--set-secrets "PARSEC_BRAIN_KEY=$_BRAIN_KEY_SECRET")
+        gcloud run deploy "$_SERVICE" "$${FLAGS[@]}"
+
+images:
+  - $_REGION-docker.pkg.dev/$PROJECT_ID/$_REPO/$_SERVICE:$BUILD_ID
+  - $_REGION-docker.pkg.dev/$PROJECT_ID/$_REPO/$_SERVICE:latest
+
+options:
+  logging: CLOUD_LOGGING_ONLY

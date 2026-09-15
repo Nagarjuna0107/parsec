@@ -117,16 +117,21 @@ parsec/
     opencode-plugin/      OpenCode plugin shim
     installer/            native macOS .pkg and Windows Inno Setup sources
     marketplace/          the marketplace manifest published to daseinlabs/plugins
+    brain/                the scoring service (Python): GNN inference over a curator
+                          checkpoint, self-validating bundle, calibrated tau. Self-hostable;
+                          the released base model lives on the Hugging Face Hub
+  docker-compose.yml      self-host the scoring service next to the host-process proxy
   scripts/                install scripts, release helper, dev helpers
-  docs/                   architecture and integration notes (see docs/README.md)
 ```
 
 Dependency direction (enforced): `proxy → engine`; `plugin → proxy` (manages
-the process); `mapgen` is a leaf. Nothing in this repository depends on the
-hosted services' code.
+the process); `mapgen` is a leaf; `brain` imports `contracts` only and nothing
+client-side imports `brain`. Training code is not in this repository.
 
-**Licensing:** everything here is MIT. The scoring service, training
-pipeline, and account platform are separate, closed components.
+**Licensing:** everything here is MIT, the scoring service included. The
+training pipeline, the labeled trace corpus, and the account platform are
+separate, closed components; the base curator checkpoint is published
+separately on the Hugging Face Hub under its own model license.
 
 ## 7b. Stack decision
 

@@ -9,6 +9,14 @@ __pycache__/
 .ruff_cache/
 .pytest_cache/
 
+# Scoring-service artifacts: the checkpoint and bge weights are fetched, never
+# committed (bake dirs keep their .gitkeep so the Dockerfile COPY succeeds).
+packages/brain/bundle/*
+!packages/brain/bundle/.gitkeep
+packages/brain/embed-model/*
+!packages/brain/embed-model/.gitkeep
+*.pt
+
 # Node (opencode plugin, installer tooling)
 node_modules/
 

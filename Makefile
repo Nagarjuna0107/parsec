@@ -1,8 +1,10 @@
-.PHONY: help fmt clippy rust-test check plugin lint-py release
+.PHONY: help fmt clippy rust-test check plugin lint-py brain-test brain-up brain-down release
 
 help:
 	@echo "make check    — rust fmt + clippy + tests (same flags CI runs)"
 	@echo "make lint-py  — ruff check + format check on the Python helpers"
+	@echo "make brain-test — scoring-service unit tests (hermetic ones run without a checkpoint)"
+	@echo "make brain-up / brain-down — self-host the scoring service with docker compose"
 	@echo "make plugin   — build + install the local (gitignored) plugin binary"
 	@echo "make release VERSION=X.Y.Z — bump workspace version, commit, tag (push = publish)"
 
@@ -19,10 +21,23 @@ rust-test:
 
 check: fmt clippy rust-test
 
-# Python helpers (parity generators, mock upstream, mitmproxy addon).
+# Python helpers (parity generators, mock upstream, mitmproxy addon) and the
+# scoring service. packages/brain is lint-only (ruff.toml [format] excludes it).
 lint-py:
 	ruff check .
 	ruff format --check .
+
+# Scoring service (packages/brain). Tests that need a curator checkpoint skip
+# loudly unless PARSEC_CKPT points at one; the hermetic set always runs.
+#   python -m venv packages/brain/.venv && packages/brain/.venv/bin/pip install -e "packages/brain[test]"
+brain-test:
+	cd packages/brain && python -m pytest tests/ -q
+
+brain-up:
+	docker compose up -d --build brain
+
+brain-down:
+	docker compose down
 
 # Build + install the local (gitignored) plugin binary. BRAIN_URL bakes the
 # default scoring endpoint (brain.rs BAKED_BRAIN_URL); PLATFORM_URL bakes the

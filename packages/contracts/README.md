@@ -12,7 +12,7 @@ Single source of truth for every cross-package, cross-language schema:
   anonymous client-minted machine id + coarse environment facts (version, os,
   arch, configured harnesses). Fleet accounting; every field pattern-gated so
   the unauthenticated path cannot carry raw text. See
-  docs/install-tracking.md.
+  packages/proxy/src/install.rs.
 - `schemas/brain-api.schema.json` — scoring request/response **v1, SERVED**:
   client-computed chunk vectors + structural features + opaque ids in,
   quantized keep/cut scores out. Raw text is unrepresentable in this schema
@@ -25,8 +25,8 @@ Single source of truth for every cross-package, cross-language schema:
   (no raw text leaves the machine) or the default dev contract (which
   still requires the explicit `PARSEC_BRAIN_DEV_RAW=1` opt-in).
 - `schemas/brain-api-dev.schema.json` — the **v0 dev contract the proxy
-  speaks today** (docs/brain-serving-v0.md): internal message view in (RAW
-  TEXT — our own machines only, gated by `PARSEC_BRAIN_DEV_RAW=1`),
+  speaks today** (packages/brain/README.md): internal message view in (RAW
+  TEXT — only for a scoring host you operate, gated by `PARSEC_BRAIN_DEV_RAW=1`),
   grid-integer scores + calibrated tau out, with a per-request cross-language
   chunker-parity checksum. Dies when the client featurization port lands.
 

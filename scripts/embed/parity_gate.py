@@ -3,8 +3,8 @@
 
 Embeds a diverse text battery via:
   (a) local onnxruntime on ~/.parsec/models/bge-large-onnx (fp32 reference),
-  (b) the real dasein-embed service, if reachable at PARSEC_EMBED_URL
-      (kubectl port-forward svc/dasein-embed 18080:80),
+  (b) a live bge-large serving endpoint, if reachable at PARSEC_EMBED_URL
+      (the scoring service's `remote` embed protocol),
   (c) optionally --rust-vectors: the OnnxEmbedder output from
       `cargo run -p parsec-engine --features onnx --example onnx_battery`,
   (d) optionally --int8: the model.int8.onnx dynamic-quantization variant.
@@ -165,7 +165,7 @@ def main() -> int:
 
     ok = True
     if not args.skip_remote:
-        print(f"(b) remote dasein-embed: {args.remote_url}")
+        print(f"(b) remote bge endpoint: {args.remote_url}")
         remote = remote_embed(args.remote_url, texts)
         if remote is None:
             ok = False

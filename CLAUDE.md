@@ -18,13 +18,21 @@ decisions. Non-negotiables when writing code here:
   on the serving path.
 - **Measurement honesty.** Savings numbers come only from the per-request
   `count_tokens` counterfactual, never a modeled baseline.
-- **Dependency direction**: `proxy → engine`; `mapgen` is a leaf. Nothing
-  here depends on hosted-service code.
+- **Dependency direction**: `proxy → engine`; `mapgen` is a leaf. `brain`
+  (the scoring service) imports `contracts` only, never a client crate, and
+  no client code imports `brain`. Training code is not in this repository
+  and must never become a runtime dependency of serving.
+- **The brain serves the vendored reference path.** `packages/brain/src/
+  parsec_brain/vendored/` is the exact code the checkpoints were trained
+  under; parity with the trainer forward is by construction. Do not
+  "clean it up" — every struct column and env flag there is score-affecting.
+  The bundle self-validates at startup and refuses a mismatched checkpoint.
 - **No TypeScript in client/plugin code.** Client = Rust (`parsec` binary +
-  plugin markdown/JSON). The OpenCode plugin shim is the one JS file.
+  plugin markdown/JSON); server = Python. The OpenCode plugin shim is the one
+  JS file.
 - **Parity fixtures are frozen goldens.** They were generated from a Python
   reference implementation that is not in this repository. Do not regenerate
   or hand-edit them; a change in behaviour that breaks a fixture needs a
   maintainer to regenerate it.
-- **Every new env var** goes in `docs/environment-variables.md` in the same
+- **Every new env var** gets a doc comment where it is read, in the same
   change.

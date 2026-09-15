@@ -67,10 +67,31 @@ Delete it whenever you like.
 | `packages/opencode-plugin` | JS | OpenCode plugin shim. |
 | `packages/installer` | Shell/Inno | Native macOS and Windows installer sources. |
 | `packages/marketplace` | JSON | The marketplace manifest published to `daseinlabs/plugins`. |
+| `packages/brain` | Python | The scoring service: GNN inference over a curator checkpoint, self-validating bundle, calibrated tau. Self-hostable. |
 
-The scoring service, training pipeline, and account platform are separate,
-closed components. This repository is the deterministic shell that talks to
-them over the contracts in `packages/contracts`, and runs without them.
+The training pipeline and the account platform are separate, closed
+components. Everything here talks to them only over the contracts in
+`packages/contracts`, and runs without them.
+
+## Self-host the scoring service
+
+The proxy runs without any scoring service (no-reread hook, loop breaker,
+savings ledger). Curation needs one, and you can run it yourself: it is
+`packages/brain`, one Python process holding the curator checkpoint and the
+bge-large encoder.
+
+```sh
+# 1. a curator checkpoint — the released base model on the Hugging Face Hub
+export PARSEC_CKPT=hf://<org>/<repo>/<checkpoint>.pt   # or a local path
+# 2. the service (in-process bge-large; CPU works, a GPU is faster)
+docker compose up -d                                   # http://127.0.0.1:8090
+# 3. point the proxy at it
+export PARSEC_BRAIN_URL=http://127.0.0.1:8090
+```
+
+`packages/brain/README.md` has the bare-uvicorn form, the auth options, and
+a Cloud Run recipe. A self-hosted brain is where the chunk text in "What
+parsec sends" goes; with your own host, nothing leaves your infrastructure.
 
 ## Build
 
@@ -81,7 +102,9 @@ make plugin             # build and install a local plugin binary for `claude --
 ```
 
 Rust 1.98 is pinned in `rust-toolchain.toml`. No model download, no network
-needed for the test suite. See `CONTRIBUTING.md` for the dev loop.
+needed for the Rust test suite. The scoring service's tests
+(`make brain-test`) run their hermetic subset without a checkpoint. See
+`CONTRIBUTING.md` for the dev loop.
 
 ## Invariants
 

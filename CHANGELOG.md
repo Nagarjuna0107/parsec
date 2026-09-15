@@ -13,6 +13,11 @@ are published on the releases page.
 - Public repository: proxy, engine, mapgen, contracts, plugins, and installers
   now develop in the open.
 - `PARSEC_INSTALL_REPORT=0` disables the anonymous install ping.
+- `packages/brain`, the scoring service, is now in the open repository and
+  self-hostable: `docker compose up -d` plus `PARSEC_BRAIN_URL`.
+  `PARSEC_CKPT=hf://<org>/<repo>/<file>` pulls a checkpoint from the Hugging
+  Face Hub. The remote-embedder backend is now named `remote` (was an
+  internal service name) and the in-process `local` encoder is the default.
 
 ## [0.2.17] - 2026-09-13
 

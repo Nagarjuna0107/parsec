@@ -1,9 +1,22 @@
-# Python helpers only: parity fixture generators, the mock upstream, and the
-# mitmproxy addon. There is no Python package in this repo.
+# Python helpers (parity fixture generators, the mock upstream, the mitmproxy
+# addon) and the scoring service in packages/brain.
 target-version = "py311"
 line-length = 100
 extend-exclude = ["packages/plugin/bin"]
 
+[format]
+# packages/brain is served through a vendored copy of the reference scoring
+# code; its layout is kept byte-close to the reference so parity diffs stay
+# readable. Lint it, don't reflow it.
+exclude = ["packages/brain/**", "brand/**"]  # brand/ CLI theme generators are vendored as-is
+
 [lint]
 select = ["E", "F", "W", "I", "B", "UP"]
 ignore = ["E501", "B905"]  # generators mirror the Python reference source verbatim
+
+[lint.per-file-ignores]
+# Reference-style code (see [format] above): the parity pins in _flags must be
+# imported before anything else (E402), and the vendored modules keep their
+# original layout (E702 one-line statements, I001 import order, B904, UP*).
+"packages/brain/**" = ["E402", "E702", "I001", "B904", "UP"]
+"packages/brain/src/parsec_brain/vendored/**" = ["F401"]

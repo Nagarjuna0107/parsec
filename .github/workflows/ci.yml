@@ -65,10 +65,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: EmbarkStudios/cargo-deny-action@v2
+      # Not cargo-deny-action: it runs in a musl container whose toolchain
+      # rust-toolchain.toml overrides to 1.98.0-musl, which is not installed there.
+      - uses: dtolnay/rust-toolchain@master
         with:
-          command: check
-          arguments: --all-features
+          toolchain: "1.98.0"
+      - uses: taiki-e/install-action@cargo-deny
+      - run: cargo deny check
 
   python:
     name: python helpers (ruff, contracts)
@@ -84,6 +87,25 @@ jobs:
         # DIRECTION.md §8 contracts-drift: every committed example must satisfy
         # its schema, so a schema change that orphans a producer fails here.
         run: python scripts/check_contracts.py
+
+  brain:
+    name: scoring service (pytest, hermetic)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: packages/brain/pyproject.toml
+      - name: install (CPU torch)
+        run: |
+          pip install --index-url https://download.pytorch.org/whl/cpu --extra-index-url https://pypi.org/simple "torch>=2.2,<2.3"
+          pip install "./packages/brain[test]"
+      # No checkpoint in CI: the golden/parity tests skip loudly (conftest.py);
+      # the `no_ckpt`-marked suites (edge construction, embed cache, gunzip)
+      # run for real. Point PARSEC_CKPT at a checkpoint to run everything.
+      - run: make brain-test
 
   # DIRECTION.md §8 invariants, each as a real job as it lands:
   #   cache-stability-golden : packages/proxy/tests/golden_conversation.rs (in `rust`)

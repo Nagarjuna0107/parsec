@@ -1,0 +1,44 @@
+# Self-host the scoring service ("brain") next to the local proxy.
+#
+#   docker compose up -d            # brain on :8090, calibrated tau, in-process bge
+#   PARSEC_BRAIN_URL=http://127.0.0.1:8090 scripts/proxy_dev.sh   # point the proxy at it
+#
+# The proxy stays a HOST process on purpose: your agent's auth headers never
+# enter a container (docs/routing-and-liveness.md). The brain needs a curator
+# checkpoint — either mount one (default: ~/.parsec/brain/curator_v4_prod.pt)
+# or pull the released base model from the Hugging Face Hub:
+#
+#   PARSEC_CKPT=hf://<org>/<repo>/<file>.pt docker compose up -d
+#
+# packages/brain/README.md covers the knobs; docs/environment-variables.md §6
+# lists every variable.
+services:
+  brain:
+    build: ./packages/brain
+    image: parsec-brain:local
+    ports:
+      - "8090:8080"
+    volumes:
+      - ${HOME}/.parsec/brain:/bundle:ro
+      # Hugging Face cache: the bge weights (~1.3 GB) and any hf:// checkpoint
+      # download once and survive container rebuilds.
+      - parsec-hf-cache:/root/.cache/huggingface
+    environment:
+      # local (default): the bge-large encoder in-process — the trained
+      # vectors, honest scores. hash: deterministic test vectors that exercise
+      # the wiring but say NOTHING about curation quality (for smoke tests).
+      PARSEC_EMBED_BACKEND: ${PARSEC_EMBED_BACKEND:-local}
+      PARSEC_CKPT: ${PARSEC_CKPT:-/bundle/curator_v4_prod.pt}
+      PARSEC_TARGET_COV: ${PARSEC_TARGET_COV:-0.70}
+      # Leave unset for the checkpoint's calibrated tau. A forced value (e.g.
+      # 0.999) makes the machinery visibly trim regardless of the model's
+      # opinion — demo/testing only.
+      PARSEC_SERVE_TAU: ${PARSEC_SERVE_TAU:-}
+      # Optional shared bearer secret; the proxy sends it as PARSEC_BRAIN_KEY.
+      PARSEC_BRAIN_KEY: ${PARSEC_BRAIN_KEY:-}
+      PARSEC_BRAIN_LOG: ${PARSEC_BRAIN_LOG:-INFO}
+      PARSEC_BRAIN_LOG_JSON: ${PARSEC_BRAIN_LOG_JSON:-}
+    restart: unless-stopped
+
+volumes:
+  parsec-hf-cache:
