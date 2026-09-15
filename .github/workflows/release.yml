@@ -482,13 +482,21 @@ jobs:
       # Publish the marketplace repo users actually install from:
       #   claude plugin marketplace add https://github.com/daseinlabs/plugins
       #   claude plugin install parsec@parsec-marketplace
+      # Forks have no PLUGIN_PUBLISH_TOKEN and must skip publishing (their
+      # tags still get the GitHub Release attached above). `secrets` cannot be
+      # read in a step `if`, so a probe step turns its presence into an output.
+      - name: Detect publish token
+        id: publish
+        env:
+          PUBLISH_TOKEN: ${{ secrets.PLUGIN_PUBLISH_TOKEN }}
+        run: |
+          if [ -n "$PUBLISH_TOKEN" ]; then echo "enabled=true" >> "$GITHUB_OUTPUT";
+          else echo "enabled=false" >> "$GITHUB_OUTPUT"; echo "::notice::no PLUGIN_PUBLISH_TOKEN — publish step skipped"; fi
       - name: Publish to daseinlabs/plugins
         # Tags ONLY — main pushes and workflow_dispatch are dry runs of the
         # build matrix. Every tag refreshes the whole tree and both
         # latest.json keys — see the header and CONTRIBUTING.md.
-        # Forks have no PLUGIN_PUBLISH_TOKEN and skip this step entirely:
-        # their tags still get the GitHub Release attached above.
-        if: startsWith(github.ref, 'refs/tags/') && secrets.PLUGIN_PUBLISH_TOKEN != ''
+        if: startsWith(github.ref, 'refs/tags/') && steps.publish.outputs.enabled == 'true'
         env:
           PUBLISH_TOKEN: ${{ secrets.PLUGIN_PUBLISH_TOKEN }}
         run: |
