@@ -78,8 +78,8 @@ wrong place; reviewers will.
 - Python helpers: `ruff` per `ruff.toml`. Standard library only unless the
   file header says otherwise.
 - No TypeScript in client or plugin code (`DIRECTION.md §7b`).
-- Every new environment variable is documented in
-  `docs/environment-variables.md` in the same PR.
+- Every new environment variable is documented where it is read (a doc
+  comment on the `env::var` call, or the crate-level `//!` docs) in the same PR.
 
 ## Commits and sign-off
 

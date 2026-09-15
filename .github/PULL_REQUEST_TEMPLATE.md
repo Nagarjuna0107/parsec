@@ -9,5 +9,5 @@
 - [ ] `make check` passes locally (fmt, clippy, tests)
 - [ ] No new `unwrap`/`expect`/`panic!` on the serving path (fail open, but measured)
 - [ ] Parity fixtures untouched, or the change to them is explained below
-- [ ] New env vars are documented in `docs/environment-variables.md`
+- [ ] New env vars carry a doc comment where they are read
 - [ ] I agree to the Developer Certificate of Origin (`git commit -s`)
