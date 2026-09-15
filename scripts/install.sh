@@ -317,7 +317,7 @@ fi
 # ── Claude Desktop ───────────────────────────────────────────────────────────
 # Desktop has no endpoint setting (its embedded SDK is pinned to
 # api.anthropic.com), so the only route in is process-scoped TLS interception
-# via mitmproxy — see docs/claude-desktop-integration.md.
+# via mitmproxy — see packages/proxy/src/setup_desktop.rs.
 install_parsec_desktop() {
   app="$(find_claude_desktop || true)"
   if [ -n "$app" ]; then

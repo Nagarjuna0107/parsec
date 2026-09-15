@@ -7,7 +7,7 @@
 #
 #   make release VERSION=0.2.8
 #
-# Every release rolls out to everyone (docs/release-channels.md — single
+# Every release rolls out to everyone (CONTRIBUTING.md — single
 # channel as of 2026-09-02). Pushing is deliberately left
 # to you (that is the moment the release actually happens):
 #   git push origin <branch> vX.Y.Z

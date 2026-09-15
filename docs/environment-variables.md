@@ -70,8 +70,8 @@ Read in `packages/proxy/src/brain.rs` (`BrainConfig::from_env`).
 |---|---|---|
 | `PARSEC_BRAIN_URL` | unset (dev builds); baked production URL (release builds) | **The enable switch.** Release binaries carry a compile-time default (`PARSEC_DEFAULT_BRAIN_URL` stamped by release.yml → the production Cloud Run URL); the runtime var always overrides it, and setting it EMPTY disables the brain even on a release build. Dev/CI builds bake nothing: unset ⇒ no brain. |
 | `PARSEC_BRAIN_CONTRACT` | `dev` (env URL) / `v1` (baked URL) | Only the exact string `v1` selects the textless client-featurized contract. When the URL comes from the baked release default, the contract defaults to v1 instead — a released binary is data-plane-clean by default. |
-| `PARSEC_BRAIN_DEV_RAW` | unset | `1` is the **required opt-in** for the dev contract (raw internal text rides to our cluster — dev machines only). Without it, a dev-contract brain URL is refused and curation stays passthrough. |
-| `PARSEC_BRAIN_KEY` | unset | Bearer token sent to the brain (and checked by it, §6). Shared fleet secret — coarse "reject anonymous scanners" filter, not per-user auth. |
+| `PARSEC_BRAIN_DEV_RAW` | unset | `1` is the **required opt-in** for the dev contract (raw internal text rides to the scoring host — only for a host you operate). Without it, a dev-contract brain URL is refused and curation stays passthrough. |
+| `PARSEC_BRAIN_KEY` | unset | Bearer token sent to the brain (and checked by it, §6). Shared secret — coarse "reject anonymous scanners" filter, not per-user auth. |
 | `PARSEC_BRAIN_TIMEOUT_MS` | `10000` | Per-request brain HTTP timeout. |
 | `PARSEC_API_KEY` | unset | The user's per-account `psc_` key (minted at `app.getparsec.ai`). **The master entitlement gate: with NO key resolvable, parsec saves nothing** — the local hook (no-reread/loop-breaker) is inert, the backend is never called, and the proxy is a pure passthrough (Claude Code runs normally). A self-host `PARSEC_BRAIN_KEY` also satisfies the gate. The single source of truth is `apikey::resolve_key`/`enabled`. When set alongside a platform URL, each savings-ledger row is ALSO shipped to `/ledger` for per-user attribution. **The key arrives via `parsec login`** (browser handoff — see `docs/login-handoff.md`), which the install scripts, the native installers, the tray's *Sign in* item and the `/parsec:login` skill all run; a browserless machine stores a dashboard-minted key with `parsec key set <psc_…>`. Either way it lands in `~/.parsec/credentials.json` (0600), effective next request/session; this env var overrides that file. |
 | `PARSEC_NO_LOGIN` | unset | `1` stops the installers (install.sh / install.ps1 / the macOS .pkg postinstall) from ending in the browser sign-in. For CI and scripted installs; a baked `--key` / `PARSEC_API_KEY` skips it on its own. `install.sh --no-login` and `install.ps1 -NoLogin` are the flag forms. |
@@ -119,6 +119,43 @@ to `~/.parsec/adjudicator.jsonl`.
 |---|---|---|
 | `PARSEC_ADJUDICATOR` | `advise` | `off` \| `advise` (log only) \| `block` (may block a premature stop). Blocking is deliberately opt-in — the reference's block-on-CONTINUE overrode correct stops. |
 | `PARSEC_ADJ_MAX_BLOCKS` | `2` | Per-session cap on blocked stops. |
+
+## 6. Scoring service (`packages/brain`, Python)
+
+Read in `packages/brain/src/parsec_brain/` (`bundle.py`, `scorer.py`,
+`app.py`, `keyauth.py`, `_log.py`, `vendored/embedding.py`,
+`vendored/local_embed.py`, `vendored/parsec_embed.py`). Self-hosting is
+covered in `packages/brain/README.md`.
+
+| Var | Default | Effect |
+|---|---|---|
+| `PARSEC_CKPT` | `~/.parsec/brain/curator_v4_prod.pt` | Checkpoint: a local path, or `hf://<org>/<repo>/<file>` fetched from the Hugging Face Hub (cached). The bundle self-validates shapes (incl. doom_head presence) and refuses to start on mismatch. |
+| `PARSEC_RULES_JSON` | `<package>/models/rules.json` | Rule-head roster. |
+| `AC_CHANGEPRONE_PKL` | `<package>/models/changeprone.pkl` | Readout col-42 sidecar; absent ⇒ zero-filled column. |
+| `PARSEC_TARGET_COV` | `0.70` (falls back to `AC_TARGET_COV`) | Coverage the calibrated tau resolves. |
+| `PARSEC_SERVE_TAU` | unset | Manual tau override — **demo/testing only**; leave unset for calibrated serving. |
+| `PARSEC_HOODS_PKL` | unset | Neighborhood artifact for `/v1/neighbors`; unset ⇒ neighbors endpoint inert (governor runaway signal gets no median). |
+| `PARSEC_NEIGHBORS` | `16` | Neighbors k. |
+| `PARSEC_NEIGHBORS_X` | `2` | Trained expansion value — **do not change**. |
+| `PARSEC_EMBED_BACKEND` | `local` | Server-side embedder: `local` (bge-large-en-v1.5 in-process, needs the `[embed]` extra) \| `remote` (an HTTP embed service you run, `PARSEC_EMBED_URL` required) \| `hash` (hermetic tests; scores meaningless). Note the different default from the proxy's client-side var of the same name. |
+| `PARSEC_EMBED_MODEL_DIR` | unset | `local` backend: a directory holding the bge weights (e.g. baked into the image at `/embed-model`). Unset ⇒ the Hugging Face hub/cache. |
+| `PARSEC_EMBED_URL` | unset | `remote` backend: the embedding service endpoint (`POST {"model_id","texts"} → {"vectors"}`). |
+| `PARSEC_EMBED_MODEL` | `bge-large-en-v1.5` | `remote` backend: model id sent to the embed service. |
+| `PARSEC_EMBED_BATCH` | `512` | `remote` backend: embed batch size (GPU amortization). |
+| `PARSEC_EMBED_CACHE_MAX` | `100000` | Per-layer entry cap for the two server embed caches (scorer exact-text layer + embedder sha1 layer), evicted LRU with the in-flight batch pinned (`embed_cache.py`). `0`/`off` restores the unbounded cache-forever behavior. Pure cache: eviction can only cost a re-embed, never change a score. |
+| `PARSEC_TORCH_THREADS` | unset | Pins `torch.set_num_threads` at startup — under cgroups torch reads the HOST core count and oversubscribes, so set it to the container's CPU limit. Unset = torch defaults. |
+| `AC_EDGES_FAST` | on | Vectorized rel-0/rel-2 edge construction, bit-identical to the reference loops (pinned by `tests/test_edges_fast.py`). `off` restores the pure-Python scans. |
+| `PARSEC_BRAIN_KEY` | unset | If set, bearer auth is required on every `/v1/*` endpoint (`/health` stays open). |
+| `PARSEC_PLATFORM_URL` | unset | If set, takes precedence over `PARSEC_BRAIN_KEY`: every request's bearer is a per-user `psc_` key validated against `{url}/keys/validate/{key}` (must be valid AND entitled). The hosted service's seam; self-hosters leave it unset. |
+| `PARSEC_BRAIN_AUTH_STRICT` | unset | `1` fails closed when the platform is unreachable; default serves and counts a fail-open. |
+| `PARSEC_BRAIN_AUTH_TTL_S` | `300` | Cache lifetime of an entitled verdict (denials re-check after 30 s). |
+| `PARSEC_BRAIN_AUTH_TIMEOUT_S` | `3` | Platform validation HTTP timeout. |
+| `PARSEC_BRAIN_LOG` | `INFO` | Log level. |
+| `PARSEC_BRAIN_LOG_JSON` | unset | `1` switches to JSON log lines. |
+
+The `AC_*` graph-shape flags (`AC_CHUNK_MODE`, `AC_CHUNK_LINES`, `AC_HETGRAPH`,
+…) are pinned by `_flags.py` to the values the checkpoint was trained under and
+are not configuration; the effective snapshot is on `/v1/bundle`.
 
 ## Quick recipes
 

@@ -1,7 +1,7 @@
 # parsec-opencode
 
 Thin [opencode](https://opencode.ai) shim for the parsec curating proxy
-(docs/tool-integrations-survey.md §3.4 — Phase 1). All curation stays in the
+(phase 1 of the OpenCode integration). All curation stays in the
 local Rust `parsec` binary; this plugin only:
 
 1. routes opencode's **Anthropic provider** at the local proxy

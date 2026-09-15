@@ -114,7 +114,9 @@ binaries reach the hosted services with zero configuration. A build without
 them reads `PARSEC_BRAIN_URL` / `PARSEC_PLATFORM_URL` at runtime, or runs with
 neither.
 
-See `docs/release-channels.md` for the channel policy.
+Channel policy: there is one channel. Every `vX.Y.Z` tag rolls out to everyone;
+a tag with a suffix (`v0.3.0-rc.1`) publishes assets only and moves no
+pointer, so nothing reaches users who did not type the tag name.
 
 ## Reporting security issues
 

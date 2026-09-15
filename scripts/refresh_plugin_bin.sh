@@ -20,7 +20,7 @@ for v in PARSEC_DEFAULT_BRAIN_URL PARSEC_DEFAULT_PLATFORM_URL; do
   fi
 done
 # No cargo features remain: the ONNX embedder moved server-side on
-# 2026-07-20 (docs/server-side-embedding.md), taking ort/tokenizers with it.
+# 2026-07-20 (embedding moved server-side), taking ort/tokenizers with it.
 cargo build --release --bin parsec
 DEST=packages/plugin/bin/darwin-arm64/parsec
 cp target/release/parsec "$DEST.tmp"

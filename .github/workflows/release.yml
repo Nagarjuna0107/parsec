@@ -4,7 +4,7 @@ name: release
 # to the public marketplace repo daseinlabs/plugins (DIRECTION.md §7b:
 # distribution is git-clone with no build step, so binaries ship prebuilt).
 #
-# Publishing is TAG-ONLY (docs/release-channels.md). Pushes to main still run
+# Publishing is TAG-ONLY (channel policy in CONTRIBUTING.md). Pushes to main still run
 # the cross-platform build matrix — ci.yml is Linux-only, so this is where a
 # macOS or Windows build break surfaces before a release — but nothing ships.
 # Every tag publishes the same way (single channel, 2026-09-02): the plugins
@@ -65,7 +65,7 @@ jobs:
       # embeds) — see BrainConfig::from_env.
       #
       # No model ships with the client since 2026-07-20: the embedder moved
-      # server-side (docs/server-side-embedding.md), so the `onnx` feature,
+      # server-side (2026-07-20), so the `onnx` feature,
       # the PARSEC_DEFAULT_MODEL_* repo variables, and first-run model
       # download are all gone. Install → first session → curation on, with
       # no 1.3GB download in the middle.
@@ -485,7 +485,7 @@ jobs:
       - name: Publish to daseinlabs/plugins
         # Tags ONLY — main pushes and workflow_dispatch are dry runs of the
         # build matrix. Every tag refreshes the whole tree and both
-        # latest.json keys — see the header and docs/release-channels.md.
+        # latest.json keys — see the header and CONTRIBUTING.md.
         # Forks have no PLUGIN_PUBLISH_TOKEN and skip this step entirely:
         # their tags still get the GitHub Release attached above.
         if: startsWith(github.ref, 'refs/tags/') && secrets.PLUGIN_PUBLISH_TOKEN != ''

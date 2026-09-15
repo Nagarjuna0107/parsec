@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Launch the LOCAL data-plane proxy for manual testing (docs/manual-testing.md).
+# Launch the LOCAL data-plane proxy for manual testing (CONTRIBUTING.md "Dev loop").
 # The proxy is a host process on purpose: your Claude auth headers pass
 # through it to api.anthropic.com and must never enter a container.
 #
