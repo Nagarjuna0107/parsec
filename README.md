@@ -1,4 +1,20 @@
-# parsec
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/brand/parsec-mark-glow.svg">
+    <img src="assets/brand/parsec-mark-light.svg" width="220" alt="parsec">
+  </picture>
+</p>
+
+<h1 align="center">parsec</h1>
+
+<p align="center"><b>2× the context. ½ the cost.</b><br>
+<sub>Same model. Longer reach.</sub></p>
+
+<p align="center">
+  <a href="https://github.com/daseinlabs/plugins/releases/latest"><img alt="latest release" src="https://img.shields.io/github/v/release/daseinlabs/plugins?style=flat-square&labelColor=0A0E0C&color=4AF626"></a>
+  <a href="https://github.com/daseinlabs/parsec/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/daseinlabs/parsec/ci.yml?branch=main&style=flat-square&labelColor=0A0E0C&color=4AF626"></a>
+  <a href="LICENSE"><img alt="MIT license" src="https://img.shields.io/badge/license-MIT-4AF626?style=flat-square&labelColor=0A0E0C"></a>
+</p>
 
 **Context savings for coding agents.** parsec is a local proxy and plugin for
 Claude Code, OpenCode, Codex CLI, and Claude Desktop that cuts the tokens your
@@ -12,27 +28,77 @@ touches anyone else's infrastructure.
 
 ## Install
 
-One line, then sign in when the installer opens the browser:
+<table align="center">
+  <tr>
+    <td align="center" width="33%">
+      <a href="#macos"><picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/brand/os/macos-dark.svg">
+    <img src="assets/brand/os/macos-light.svg" width="56" alt="macOS">
+  </picture></a><br>
+      <b>macOS</b><br><sub>Apple silicon</sub>
+    </td>
+    <td align="center" width="33%">
+      <a href="#windows"><picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/brand/os/windows-dark.svg">
+    <img src="assets/brand/os/windows-light.svg" width="56" alt="Windows">
+  </picture></a><br>
+      <b>Windows</b><br><sub>x64</sub>
+    </td>
+    <td align="center" width="33%">
+      <a href="#linux"><picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/brand/os/linux-dark.svg">
+    <img src="assets/brand/os/linux-light.svg" width="56" alt="Linux">
+  </picture></a><br>
+      <b>Linux</b><br><sub>x64</sub>
+    </td>
+  </tr>
+  <tr>
+    <td align="center"><a href="https://github.com/daseinlabs/plugins/releases/latest"><code>.pkg</code> installer</a></td>
+    <td align="center"><a href="https://github.com/daseinlabs/plugins/releases/latest"><code>setup.exe</code> installer</a></td>
+    <td align="center"><a href="#linux">one-line script</a></td>
+  </tr>
+</table>
+
+Every installer signs you in when it opens the browser, then installs the
+`parsec` binary and the Claude Code plugin. The native installers are on the
+[releases page](https://github.com/daseinlabs/plugins/releases/latest) next to
+the raw binaries the scripts download.
+
+### macOS
+
+Download `parsec-<version>-macos-arm64.pkg` from the
+[releases page](https://github.com/daseinlabs/plugins/releases/latest) and
+open it, or run:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/daseinlabs/plugins/main/install.sh | bash
 ```
 
-Windows (PowerShell):
+### Windows
+
+Download `parsec-<version>-windows-x64-setup.exe` from the
+[releases page](https://github.com/daseinlabs/plugins/releases/latest) and run
+it, or in PowerShell:
 
 ```powershell
 irm https://raw.githubusercontent.com/daseinlabs/plugins/main/install.ps1 | iex
 ```
 
-Or, with the Claude Code CLI:
+### Linux
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/daseinlabs/plugins/main/install.sh | bash
+```
+
+The script fetches the `parsec-linux-x64` binary for the latest release and
+installs the plugin.
+
+### From the Claude Code CLI
 
 ```sh
 claude plugin marketplace add https://github.com/daseinlabs/plugins
 claude plugin install parsec@parsec-marketplace
 ```
-
-Native `.pkg` and `.exe` installers for each release are on the
-[releases page](https://github.com/daseinlabs/plugins/releases).
 
 Then in a session: `/parsec:setup` routes your agent through the proxy,
 `/parsec:savings` shows what it saved, `/parsec:share --preview` shows exactly
