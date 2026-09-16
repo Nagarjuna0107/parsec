@@ -1,17 +1,112 @@
 #!/bin/sh
-# Platform shim: dispatch to the committed per-platform parsec binary.
+# Platform shim: run the parsec binary for this platform.
+#
+# Lookup order:
+#   1. bin/<platform>/parsec beside this shim. `make plugin` dev builds and
+#      the parsec-plugin.zip release asset bundle binaries here; the source
+#      tree the marketplace serves does not (platform dirs are gitignored).
+#   2. ~/.parsec/bin/parsec — the stable path install.sh and the native
+#      installers write and every skill and hook probes. At SessionStart the
+#      version it reports is compared with this plugin's .claude-plugin/
+#      plugin.json and an OLDER binary is upgraded from GitHub Releases, so a
+#      marketplace plugin update brings its matching binary along. Hooks run
+#      on every tool call, so the probe (one extra process) is SessionStart
+#      only; hook.rs restarts a proxy that predates the plugin there too.
+#   3. Neither present: download this plugin's version from the GitHub
+#      Release on daseinlabs/parsec, sha256-verified against the release's
+#      manifest.json, into ~/.parsec/bin, then run it. Offline this exits 1
+#      with a message; hooks treat that as non-blocking.
+#
+# PARSEC_RELEASE_BASE overrides the release URL base (test installs point it
+# at a directory mirroring the GitHub layout: download/<tag>/<asset> and
+# latest/download/<asset>). Same variable as install.sh.
 dir="$(cd "$(dirname "$0")" && pwd)"
 case "$(uname -s)-$(uname -m)" in
-  Darwin-arm64) bin="$dir/darwin-arm64/parsec" ;;
-  Darwin-x86_64) bin="$dir/darwin-x64/parsec" ;;
-  Linux-x86_64) bin="$dir/linux-x64/parsec" ;;
+  Darwin-arm64) plat=darwin-arm64 ;;
+  Darwin-x86_64) plat=darwin-x64 ;;
+  Linux-x86_64) plat=linux-x64 ;;
   # Git Bash / MSYS / Cygwin report e.g. MINGW64_NT-10.0-26200-x86_64; the
   # build number varies per machine, so match on the subsystem prefix only.
-  MINGW*|MSYS*|CYGWIN*) bin="$dir/win-x64/parsec.exe" ;;
+  MINGW*|MSYS*|CYGWIN*) plat=win-x64 ;;
   *) echo "parsec: unsupported platform $(uname -s)-$(uname -m)" >&2; exit 1 ;;
 esac
-if [ ! -x "$bin" ]; then
-  echo "parsec: no prebuilt binary for $(uname -s)-$(uname -m) in this release" >&2
+exe=parsec
+[ "$plat" = win-x64 ] && exe=parsec.exe
+
+bundled="$dir/$plat/$exe"
+[ -x "$bundled" ] && exec "$bundled" "$@"
+
+# Mirrors setup.rs home_dir(): HOME first (Git Bash users), then USERPROFILE.
+home="${HOME:-$USERPROFILE}/.parsec"
+alias="$home/bin/$exe"
+want="$(grep -o '"version": *"[^"]*"' "$dir/../.claude-plugin/plugin.json" 2>/dev/null | head -1 | cut -d'"' -f4)"
+
+# newer A B: true when X.Y.Z triple A orders after B. A pre-release suffix is
+# ignored, as in setup.rs semver_triple; unparsable input compares as 0.
+newer() {
+  a="${1%%-*}" b="${2%%-*}"
+  oldifs=$IFS
+  IFS=.
+  # shellcheck disable=SC2086  # splitting on IFS=. is the point
+  set -- $a; a1=${1:-0} a2=${2:-0} a3=${3:-0}
+  # shellcheck disable=SC2086
+  set -- $b; b1=${1:-0} b2=${2:-0} b3=${3:-0}
+  IFS=$oldifs
+  [ "$a1" -gt "$b1" ] 2>/dev/null && return 0
+  [ "$a1" -eq "$b1" ] 2>/dev/null || return 1
+  [ "$a2" -gt "$b2" ] 2>/dev/null && return 0
+  [ "$a2" -eq "$b2" ] 2>/dev/null || return 1
+  [ "$a3" -gt "$b3" ] 2>/dev/null
+}
+
+if [ -x "$alias" ]; then
+  if [ "${1:-}" = hook ] && [ "${2:-}" = SessionStart ] && [ -n "$want" ]; then
+    have="$("$alias" --version 2>/dev/null | awk '{print $2}')"
+    if [ -n "$have" ] && ! newer "$want" "$have"; then exec "$alias" "$@"; fi
+    # Older than the plugin, or does not run: fetch the plugin's version.
+  else
+    exec "$alias" "$@"
+  fi
+fi
+
+base="${PARSEC_RELEASE_BASE:-https://github.com/daseinlabs/parsec/releases}"
+if [ -n "$want" ]; then url="$base/download/v$want"; else url="$base/latest/download"; fi
+mkdir -p "$home/bin" || exit 1
+manifest="$(curl -fsSL "$url/manifest.json" 2>/dev/null || true)"
+# fetch ASSET DEST: download beside the destination, verify against the
+# manifest's sha256 when it lists the asset, then rename onto a FRESH inode —
+# overwriting a binary in place trips the macOS code-sign cache (SIGKILL on
+# next exec). A proxy already running from the old inode keeps it.
+fetch() {
+  tmp="$(mktemp "$2.XXXXXX")" || return 1
+  if ! curl -fsSL "$url/$1" -o "$tmp"; then
+    echo "parsec: could not download $url/$1" >&2
+    rm -f "$tmp"
+    return 1
+  fi
+  sha="$(printf '%s' "$manifest" | grep -o "\"$1\": *\"[0-9a-f]*\"" | head -1 | cut -d'"' -f4)"
+  if [ -n "$sha" ]; then
+    actual="$( (shasum -a 256 "$tmp" 2>/dev/null || sha256sum "$tmp" 2>/dev/null) | cut -d' ' -f1)"
+    if [ "$actual" != "$sha" ]; then
+      echo "parsec: sha256 mismatch for $1: expected $sha, got $actual" >&2
+      rm -f "$tmp"
+      return 1
+    fi
+  fi
+  chmod 755 "$tmp" && mv "$tmp" "$2"
+}
+echo "parsec: fetching ${want:-latest} ($plat) from $url" >&2
+if [ "$plat" = win-x64 ]; then
+  # App-local VC++ CRT: the loader only searches next to the exe.
+  for dll in $(printf '%s' "$manifest" | grep -o '"[^"]*\.dll"' | tr -d '"'); do
+    fetch "$dll" "$home/bin/$dll" || exit 1
+  done
+  fetch parsec-win-x64.exe "$alias" || exit 1
+else
+  fetch "parsec-$plat" "$alias" || exit 1
+fi
+if ! "$alias" --version >/dev/null 2>&1; then
+  echo "parsec: downloaded binary does not run" >&2
   exit 1
 fi
-exec "$bin" "$@"
+exec "$alias" "$@"

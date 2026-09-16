@@ -49,8 +49,8 @@ AppVersion={#Version}
 VersionInfoVersion={#NumVersion}
 AppPublisher=Dasein Labs
 AppPublisherURL=https://getparsec.ai
-AppSupportURL=https://github.com/daseinlabs/plugins
-AppUpdatesURL=https://github.com/daseinlabs/plugins/releases
+AppSupportURL=https://github.com/daseinlabs/parsec
+AppUpdatesURL=https://github.com/daseinlabs/parsec/releases
 DefaultDirName={code:ParsecBinDir}
 DisableDirPage=yes
 UsePreviousAppDir=no
@@ -153,7 +153,7 @@ Type: dirifempty; Name: "{app}"
 const
   ERROR_CANCELLED = 1223;
   RUN_KEY = 'Software\Microsoft\Windows\CurrentVersion\Run';
-  MARKETPLACE_URL = 'https://github.com/daseinlabs/plugins';
+  MARKETPLACE_URL = 'https://github.com/daseinlabs/parsec';
   // Everything [Files] stages; must match it and [UninstallDelete].
   PAYLOAD = 'parsec.exe;msvcp140.dll;msvcp140_1.dll;vcruntime140.dll;vcruntime140_1.dll;stop-parsec.ps1';
 

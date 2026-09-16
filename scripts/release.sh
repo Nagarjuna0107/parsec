@@ -56,7 +56,20 @@ fi
 # lock would otherwise dirty the tree on the next build.
 cargo update --workspace --quiet
 
-git add Cargo.toml Cargo.lock
+# The plugin's own version is the marketplace update channel: this repo IS
+# the marketplace (.claude-plugin/marketplace.json → packages/plugin), so a
+# plugin user's next update check sees this commit, and the plugin's shim
+# fetches the binary of exactly this version from the tag's GitHub Release.
+# release.yml refuses a tag whose plugin.json disagrees with it.
+PLUGIN_JSON=packages/plugin/.claude-plugin/plugin.json
+jq --arg v "$VERSION" '.version = $v' "$PLUGIN_JSON" > "$PLUGIN_JSON.tmp"
+mv "$PLUGIN_JSON.tmp" "$PLUGIN_JSON"
+if ! grep -q "\"version\": \"$VERSION\"" "$PLUGIN_JSON"; then
+  echo "failed to stamp $PLUGIN_JSON" >&2
+  exit 1
+fi
+
+git add Cargo.toml Cargo.lock "$PLUGIN_JSON"
 git commit -m "release v$VERSION"
 git tag "v$VERSION"
 echo "committed + tagged v$VERSION (rolls out to everyone on push)"

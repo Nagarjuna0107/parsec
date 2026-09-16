@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # parsec — one-line installer:
 #
-#   curl -fsSL https://raw.githubusercontent.com/daseinlabs/plugins/main/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/daseinlabs/parsec/main/scripts/install.sh | bash
 #
 # Auto-detects the coding agents on this machine (Claude Code, Codex CLI,
 # opencode) and activates parsec for each. Claude Code gets the plugin
@@ -46,13 +46,17 @@
 # (or set PARSEC_NO_DESKTOP=1 / PARSEC_NO_CA=1 / PARSEC_NO_AUTOSTART=1 /
 # PARSEC_NO_LOGIN=1 / PARSEC_API_KEY=psc_… before the plain curl | bash form.)
 #
-# Source of truth: scripts/install.sh in the parsec repo; release.yml
-# publishes it next to the binaries it references, so script and binaries
-# always ship from the same commit.
+# Source of truth: scripts/install.sh in the parsec repo, served from main;
+# the binaries it downloads are that repo's GitHub Release assets.
 set -euo pipefail
 
-BASE="${PARSEC_INSTALL_BASE:-https://raw.githubusercontent.com/daseinlabs/plugins/main}"
-MARKETPLACE_URL="${PARSEC_MARKETPLACE_URL:-https://github.com/daseinlabs/plugins}"
+# Binaries come from the GitHub Release assets on daseinlabs/parsec; the
+# marketplace is that repository itself (.claude-plugin/marketplace.json).
+# PARSEC_RELEASE_BASE points test installs at a directory mirroring the
+# GitHub layout (download/<tag>/<asset>, latest/download/<asset>); the
+# plugin's bin/parsec shim honours the same variable.
+RELEASE_BASE="${PARSEC_RELEASE_BASE:-https://github.com/daseinlabs/parsec/releases}"
+MARKETPLACE_URL="${PARSEC_MARKETPLACE_URL:-https://github.com/daseinlabs/parsec}"
 
 # ── arguments ────────────────────────────────────────────────────────────────
 tools="" # space-separated; empty ⇒ auto-detect
@@ -199,40 +203,31 @@ if [ -z "$plat" ]; then
     echo "(Windows / other: install the Claude Code plugin instead, or build from source)" >&2
     exit 1
   fi
-  echo "no parsec binary for $(uname -s) $(uname -m) — installing the Claude Code plugin only (it ships its own)."
+  echo "no parsec binary for $(uname -s) $(uname -m) — installing the Claude Code plugin only."
 fi
 if [ -n "$plat" ]; then
   mkdir -p "$(dirname "$dest")"
   # ── resolve the newest published version ───────────────────────────────────
-  # Resolve latest.json (the pointer release.yml maintains) and pull the
-  # binary from that tag's GitHub release assets, verified against the
-  # sha256 map in the same file. Since 2026-09-02 the tree is refreshed on
-  # every release too, so the fallback below can lag only between a tag's
-  # release-asset upload and its tree commit (or if latest.json is stale in
-  # a CDN cache). Resolution failure falls back to the tree so a GitHub
-  # hiccup cannot brick the installer, and a custom PARSEC_INSTALL_BASE
-  # (test installs point at a tree, not github releases) skips resolution.
-  release_tag="" release_ver="" release_sha=""
-  if [ -z "${PARSEC_INSTALL_BASE:-}" ]; then
-    latest_json="$(curl -fsSL "$BASE/latest.json" 2>/dev/null || true)"
-    case "$latest_json" in
-      *'"patch"'*) seg="${latest_json#*\"patch\":}" ;;
-      *) seg="$latest_json" ;;
-    esac
-    # First occurrence within the chosen channel's segment (grep -o + head,
-    # never greedy-sed: the file holds BOTH channels' asset maps). The
-    # `: *` tolerates the pretty-printed "key": "value" spacing.
-    release_tag="$(printf '%s' "$seg" | grep -o '"tag": *"[^"]*"' | head -1 | cut -d'"' -f4)"
-    release_ver="$(printf '%s' "$seg" | grep -o '"version": *"[^"]*"' | head -1 | cut -d'"' -f4)"
-    release_sha="$(printf '%s' "$seg" | grep -o "\"parsec-$plat\": *\"[0-9a-f]*\"" | head -1 | cut -d'"' -f4)"
-  fi
+  # Every vX.Y.Z tag is a GitHub Release on daseinlabs/parsec carrying the
+  # per-platform binaries and a manifest.json of their sha256s. Pre-release
+  # tags are marked as such, so GitHub's `releases/latest` redirect — the
+  # only pointer there is — never lands on one. Resolve the manifest through
+  # that redirect, then pull the binary from the SAME tag (not `latest`
+  # again: a release cut between the two requests would mismatch the sha).
+  # If the manifest cannot be fetched, fall back to the unverified `latest`
+  # asset so a transient GitHub hiccup cannot brick the installer.
+  manifest="$(curl -fsSL "$RELEASE_BASE/latest/download/manifest.json" 2>/dev/null || true)"
+  # `: *` tolerates the pretty-printed "key": "value" spacing.
+  release_tag="$(printf '%s' "$manifest" | grep -o '"tag": *"[^"]*"' | head -1 | cut -d'"' -f4)"
+  release_ver="$(printf '%s' "$manifest" | grep -o '"version": *"[^"]*"' | head -1 | cut -d'"' -f4)"
+  release_sha="$(printf '%s' "$manifest" | grep -o "\"parsec-$plat\": *\"[0-9a-f]*\"" | head -1 | cut -d'"' -f4)"
   # Download beside the destination (same filesystem), verify it runs, then
   # atomically rename onto a FRESH inode — overwriting an existing binary
   # in place trips the macOS code-sign cache (SIGKILL on next exec).
   tmp="$(mktemp "$dest.XXXXXX")"
   trap 'rm -f "$tmp"' EXIT
   if [ -n "$release_tag" ] &&
-    curl -fsSL "https://github.com/daseinlabs/plugins/releases/download/$release_tag/parsec-$plat" -o "$tmp" 2>/dev/null; then
+    curl -fsSL "$RELEASE_BASE/download/$release_tag/parsec-$plat" -o "$tmp" 2>/dev/null; then
     echo "downloaded parsec $release_ver ($plat, from the $release_tag release)"
     if [ -n "$release_sha" ]; then
       actual="$( (shasum -a 256 "$tmp" 2>/dev/null || sha256sum "$tmp" 2>/dev/null) | cut -d' ' -f1)"
@@ -242,8 +237,8 @@ if [ -n "$plat" ]; then
       fi
     fi
   else
-    echo "downloading parsec ($plat, tree fallback)…"
-    curl -fsSL "$BASE/plugins/parsec/bin/$plat/parsec" -o "$tmp"
+    echo "downloading parsec ($plat, newest release — manifest unavailable, unverified)…"
+    curl -fsSL "$RELEASE_BASE/latest/download/parsec-$plat" -o "$tmp"
   fi
   chmod 755 "$tmp"
   "$tmp" --version >/dev/null # refuse to install a binary that cannot run

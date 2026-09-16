@@ -95,14 +95,20 @@ Commit subjects: imperative, under 72 characters, scoped when it helps
 
 Releases are tag-driven and produced by `.github/workflows/release.yml`:
 
-1. `make release VERSION=X.Y.Z` bumps the workspace version, commits, and tags.
+1. `make release VERSION=X.Y.Z` bumps the workspace version and the plugin
+   manifest version, commits, and tags.
 2. Pushing the tag builds `parsec` for macOS arm64, Linux x64, and Windows
-   x64, assembles the plugin zip and the native installers, and attaches them
-   to a GitHub Release on this repository.
-3. The same run publishes the assembled plugin, binaries, and install scripts
-   to the public distribution repository `daseinlabs/plugins`, which is what
-   the marketplace and the one-line installers read. That step needs a
-   publish token and is skipped on forks.
+   x64, assembles the plugin zip and the native installers, and publishes
+   them all as a GitHub Release on this repository: the per-platform
+   binaries, the win-x64 CRT DLLs, `parsec-plugin.zip`, the `.pkg` and
+   `setup.exe`, and a `manifest.json` of sha256s. That release is what the
+   one-line installers read (through GitHub's `releases/latest` redirect)
+   and where the plugin's `bin/parsec` shim fetches the binary matching
+   its `plugin.json` version. No second repository and no publish token:
+   forks release to their own repository with the default token.
+3. The Claude Code marketplace is this repository itself
+   (`.claude-plugin/marketplace.json` → `packages/plugin`), so the release
+   commit's `plugin.json` bump is what marketplace users see as an update.
 
 Signing (Apple Developer ID, notarization, Azure Artifact Signing for
 Windows) switches on when the corresponding secrets are present and builds
@@ -115,8 +121,9 @@ them reads `PARSEC_BRAIN_URL` / `PARSEC_PLATFORM_URL` at runtime, or runs with
 neither.
 
 Channel policy: there is one channel. Every `vX.Y.Z` tag rolls out to everyone;
-a tag with a suffix (`v0.3.0-rc.1`) publishes assets only and moves no
-pointer, so nothing reaches users who did not type the tag name.
+a tag with a suffix (`v0.3.0-rc.1`) is published as a GitHub pre-release,
+which keeps it out of `releases/latest`, so nothing reaches users who did
+not type the tag name.
 
 ## Reporting security issues
 

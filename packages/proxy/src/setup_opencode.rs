@@ -174,11 +174,10 @@ fn binary_reported_version(path: &Path) -> Option<String> {
 }
 
 /// True when the real file at the alias path reports a NEWER version than
-/// this running binary. The install scripts resolve `latest.json` and place
-/// the newest published build (patch channel included) at exactly this
-/// path; this refresh runs from every SessionStart hook (`ensure_callable`),
-/// so without this guard the marketplace plugin — stable channel by
-/// construction — would silently revert that opt-in within one session.
+/// this running binary. The install scripts resolve the newest GitHub
+/// Release and place its build at exactly this path; this refresh runs from every SessionStart hook (`ensure_callable`),
+/// so without this guard an older marketplace plugin build would
+/// silently revert that opt-in within one session.
 /// Upgrades and same-version refreshes proceed; only downgrades stop.
 fn alias_is_newer_build(alias: &Path) -> bool {
     let (Some(alias_v), Some(run_v)) = (

@@ -4,7 +4,7 @@
   "plugins": [
     {
       "name": "parsec",
-      "source": "./plugins/parsec",
+      "source": "./packages/plugin",
       "description": "Context savings for coding agents — Claude Code, Codex CLI, opencode: blocks wasteful re-reads and command loops, measures every token it saves — per-request count_tokens counterfactual, not a modeled baseline.",
       "category": "productivity",
       "keywords": ["tokens", "savings", "context", "compression", "proxy"]

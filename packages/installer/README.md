@@ -42,7 +42,7 @@ packages\installer\windows\build.ps1 -Version 0.2.8 -BinDir target\release
 
 CI: the `installers` job in `.github/workflows/release.yml` builds both from
 the `build` job's artifacts and `pack` adds them to the release assets, so
-`manifest.json` / `latest.json` carry their sha256.
+`manifest.json` carries their sha256.
 
 ## Signing
 

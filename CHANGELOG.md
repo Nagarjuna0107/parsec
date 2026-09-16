@@ -9,6 +9,35 @@ are published on the releases page.
 
 ## [Unreleased]
 
+### Changed
+
+- Releases are published as GitHub Release assets on this repository:
+  per-platform binaries, the win-x64 CRT DLLs, `parsec-plugin.zip`, the
+  native installers, and a `manifest.json` of sha256s. The separate
+  `daseinlabs/plugins` distribution repo, its `latest.json` pointer, and the
+  `PLUGIN_PUBLISH_TOKEN` secret are retired; forks release with the default
+  token. Pre-release tags publish as GitHub pre-releases, which keeps them
+  out of `releases/latest`.
+- The Claude Code marketplace is this repository
+  (`.claude-plugin/marketplace.json` → `packages/plugin`):
+  `claude plugin marketplace add https://github.com/daseinlabs/parsec`.
+  Existing installs from `daseinlabs/plugins` keep working but no longer
+  update; remove that marketplace and add this one.
+- The plugin no longer ships binaries in its tree. `bin/parsec` (and
+  `parsec.cmd` + `bootstrap.ps1` on Windows) runs a bundled build if one is
+  beside it, else `~/.parsec/bin/parsec`, else downloads the plugin's own
+  version from GitHub Releases into `~/.parsec/bin` (sha256-verified). At
+  SessionStart an installed binary older than the plugin is upgraded the
+  same way, so a marketplace plugin update brings its binary along.
+- Install scripts move to `scripts/` on `main`
+  (`raw.githubusercontent.com/daseinlabs/parsec/main/scripts/install.sh`)
+  and resolve the newest release through `releases/latest/download/
+  manifest.json`. `PARSEC_INSTALL_BASE` (a tree to download binaries from)
+  is replaced by `PARSEC_RELEASE_BASE` (a mirror of the GitHub Releases URL
+  layout); the shims honour the same variable.
+- `make release` also stamps `packages/plugin/.claude-plugin/plugin.json`,
+  and the release job refuses a tag that disagrees with it.
+
 ## [0.2.18] - 2026-09-15
 
 First release cut from the public repository.

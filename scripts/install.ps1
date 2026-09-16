@@ -1,6 +1,6 @@
 # parsec -- one-line installer for Windows (PowerShell 5.1+):
 #
-#   powershell -c "irm https://raw.githubusercontent.com/daseinlabs/plugins/main/install.ps1 | iex"
+#   powershell -c "irm https://raw.githubusercontent.com/daseinlabs/parsec/main/scripts/install.ps1 | iex"
 #
 # Auto-detects the coding agents on this machine (Claude Code, Codex CLI,
 # opencode) and activates parsec for each. Claude Code gets the plugin
@@ -46,9 +46,8 @@
 #   powershell -c "Set-Item Env:PARSEC_API_KEY psc_...; irm .../install.ps1 | iex"
 # which reads the same from cmd and from PowerShell: no $ to expand.)
 #
-# Source of truth: scripts/install.ps1 in the parsec repo; release.yml
-# publishes it next to the binaries it references, so script and binaries
-# always ship from the same commit.
+# Source of truth: scripts/install.ps1 in the parsec repo, served from main;
+# the binaries it downloads are that repo's GitHub Release assets.
 param(
     [string[]]$Tools = @(),
     [switch]$Byok,
@@ -86,8 +85,13 @@ $PSNativeCommandUseErrorActionPreference = $false
 # PowerShell 5.1 defaults to TLS 1.0 -- GitHub requires 1.2+.
 [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 
-$Base = if ($env:PARSEC_INSTALL_BASE) { $env:PARSEC_INSTALL_BASE } else { "https://raw.githubusercontent.com/daseinlabs/plugins/main" }
-$MarketplaceUrl = if ($env:PARSEC_MARKETPLACE_URL) { $env:PARSEC_MARKETPLACE_URL } else { "https://github.com/daseinlabs/plugins" }
+# Binaries come from the GitHub Release assets on daseinlabs/parsec; the
+# marketplace is that repository itself (.claude-plugin/marketplace.json).
+# PARSEC_RELEASE_BASE points test installs at a directory mirroring the
+# GitHub layout (download/<tag>/<asset>, latest/download/<asset>); the
+# plugin's bootstrap.ps1 honours the same variable.
+$ReleaseBase = if ($env:PARSEC_RELEASE_BASE) { $env:PARSEC_RELEASE_BASE } else { "https://github.com/daseinlabs/parsec/releases" }
+$MarketplaceUrl = if ($env:PARSEC_MARKETPLACE_URL) { $env:PARSEC_MARKETPLACE_URL } else { "https://github.com/daseinlabs/parsec" }
 
 # -- arguments (param, or env fallbacks for the plain irm|iex form) -----------
 if (-not $Tools -and $env:PARSEC_TOOLS) { $Tools = $env:PARSEC_TOOLS -split "[ ,]+" }
@@ -379,36 +383,33 @@ if (-not $isX64 -and ("desktop" -in $Tools)) {
 }
 
 # -- resolve the newest published version --------------------------------------
-# The plugins TREE only advances on stable (v0.X.0) tags, but someone
-# explicitly running the installer is asking for the newest build -- so
-# resolve latest.json (the pointer release.yml maintains) and pull binaries
-# from that tag's GitHub release assets, verified against the sha256 map in
-# the same file. Patch binaries exist ONLY as release assets; the tree would
-# silently serve the previous stable. Resolution failure falls back to the
-# stable tree, and a custom PARSEC_INSTALL_BASE (test installs point at a
-# tree, not at github releases) skips resolution entirely.
+# Every vX.Y.Z tag is a GitHub Release on daseinlabs/parsec carrying the
+# per-platform binaries, the CRT DLLs, and a manifest.json of their sha256s.
+# Pre-release tags are marked as such, so GitHub's `releases/latest`
+# redirect -- the only pointer there is -- never lands on one. Resolve the
+# manifest through that redirect, then pull every asset from the SAME tag
+# (not `latest` again: a release cut between two requests would mismatch
+# the sha). If the manifest cannot be fetched, fall back to the unverified
+# `latest` assets so a transient GitHub hiccup cannot brick the installer.
 $ReleaseTag = $null
 $ReleaseAssets = $null
-if (-not $env:PARSEC_INSTALL_BASE) {
-    try {
-        $latest = Invoke-RestMethod -Uri "$Base/latest.json" -UseBasicParsing
-        $chan = if ($latest.patch) { $latest.patch } else { $latest.stable }
-        if ($chan -and $chan.tag) {
-            $ReleaseTag = $chan.tag
-            $ReleaseAssets = $chan.assets
-            Write-Host "newest published version: $($chan.version) ($ReleaseTag)"
-        }
-    }
-    catch {
-        Write-Host "(could not resolve latest.json - falling back to the stable tree)"
+try {
+    $manifest = Invoke-RestMethod -Uri "$ReleaseBase/latest/download/manifest.json" -UseBasicParsing
+    if ($manifest -and $manifest.tag) {
+        $ReleaseTag = $manifest.tag
+        $ReleaseAssets = $manifest.assets
+        Write-Host "newest published version: $($manifest.version) ($ReleaseTag)"
     }
 }
+catch {
+    Write-Host "(could not resolve the release manifest - downloading the newest release unverified)"
+}
 
-# Download one published file: from the resolved release's assets
-# (sha256-verified) when resolution succeeded, else from the stable tree.
-function Get-ParsecAsset([string]$ReleaseName, [string]$TreePath, [string]$OutFile) {
+# Download one published asset: from the resolved release (sha256-verified)
+# when resolution succeeded, else from the `latest` redirect.
+function Get-ParsecAsset([string]$ReleaseName, [string]$OutFile) {
     if ($ReleaseTag) {
-        Invoke-WebRequest -Uri "https://github.com/daseinlabs/plugins/releases/download/$ReleaseTag/$ReleaseName" `
+        Invoke-WebRequest -Uri "$ReleaseBase/download/$ReleaseTag/$ReleaseName" `
             -OutFile $OutFile -UseBasicParsing
         $expected = if ($ReleaseAssets) { $ReleaseAssets.$ReleaseName } else { $null }
         if ($expected) {
@@ -419,7 +420,7 @@ function Get-ParsecAsset([string]$ReleaseName, [string]$TreePath, [string]$OutFi
         }
     }
     else {
-        Invoke-WebRequest -Uri "$Base/$TreePath" -OutFile $OutFile -UseBasicParsing
+        Invoke-WebRequest -Uri "$ReleaseBase/latest/download/$ReleaseName" -OutFile $OutFile -UseBasicParsing
     }
 }
 
@@ -437,7 +438,7 @@ if (-not $needsBinary) {
     if ($binaryRequired) {
         Write-Error "unsupported architecture: $nativeArch (win-x64 only today; ARM64 needs Windows 11 for x64 emulation - or use WSL / the Claude Code plugin)"
     }
-    Write-Warning "no parsec binary runs on $nativeArch - installing the Claude Code plugin only (it ships its own binary)"
+    Write-Warning "no parsec binary runs on $nativeArch - installing the Claude Code plugin only"
 }
 if ($isArm64Emu) {
     Write-Host "ARM64 Windows 11: installing the win-x64 binary - it runs under the OS's built-in x64 emulation."
@@ -451,7 +452,7 @@ if ($needsBinary) {
     $trayWasRunning = $false
     try {
         Write-Host "downloading parsec (win-x64)..."
-        Get-ParsecAsset "parsec-win-x64.exe" "plugins/parsec/bin/win-x64/parsec.exe" $tmp
+        Get-ParsecAsset "parsec-win-x64.exe" $tmp
         # App-local VC++ CRT. parsec.exe imports msvcp140/vcruntime140, which
         # are absent on a clean Windows box; the loader only searches NEXT TO
         # the exe, so these must land in the same directory or the process
@@ -468,7 +469,7 @@ if ($needsBinary) {
         foreach ($dll in "msvcp140.dll", "msvcp140_1.dll", "vcruntime140.dll", "vcruntime140_1.dll") {
             $stage = Join-Path $destDir "$dll.parsec-new"
             try {
-                Get-ParsecAsset $dll "plugins/parsec/bin/win-x64/$dll" $stage
+                Get-ParsecAsset $dll $stage
                 $stagedDlls[$dll] = $stage
             }
             catch {

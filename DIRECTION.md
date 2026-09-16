@@ -113,10 +113,10 @@ parsec/
     contracts/            JSON Schemas shared across languages: brain API, savings ledger,
                           telemetry events, install report
     plugin/               Claude Code plugin: markdown, JSON, launcher shims (binaries are
-                          built by release.yml, never committed)
+                          GitHub Release assets, never committed; the shims fetch them).
+                          The marketplace is this repo: .claude-plugin/marketplace.json
     opencode-plugin/      OpenCode plugin shim
     installer/            native macOS .pkg and Windows Inno Setup sources
-    marketplace/          the marketplace manifest published to daseinlabs/plugins
     brain/                the scoring service (Python): GNN inference over a curator
                           checkpoint, self-validating bundle, calibrated tau. Self-hostable;
                           the released base model lives on the Hugging Face Hub

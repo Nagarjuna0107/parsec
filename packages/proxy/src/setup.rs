@@ -697,8 +697,8 @@ pub(crate) fn proxy_health_version(port: u16) -> Option<String> {
 /// Parse "X.Y.Z" (optionally "vX.Y.Z" or with a "-pre" suffix, which is
 /// ignored for ordering) into a comparable triple. Shared by the two places
 /// that must never DOWNGRADE: the hook's proxy-replacement check and the
-/// plugin's binary-alias refresh. Install scripts resolve `latest.json` and
-/// may legitimately place a patch-channel binary that is NEWER than the
+/// plugin's binary-alias refresh. Install scripts resolve the newest GitHub
+/// Release and may legitimately place a binary that is NEWER than the
 /// marketplace plugin build — an equality check treats that as drift to
 /// correct, which silently reverts an explicit opt-in every session.
 pub(crate) fn semver_triple(s: &str) -> Option<(u64, u64, u64)> {

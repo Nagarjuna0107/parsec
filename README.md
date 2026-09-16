@@ -11,9 +11,9 @@
 <sub>Same model. Longer reach.</sub></p>
 
 <p align="center">
-  <a href="https://github.com/daseinlabs/plugins/releases/latest"><img alt="latest release" src="https://img.shields.io/github/v/release/daseinlabs/plugins?style=flat-square&labelColor=0A0E0C&color=4AF626"></a>
-  <a href="https://github.com/daseinlabs/parsec/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/daseinlabs/parsec/ci.yml?branch=main&style=flat-square&labelColor=0A0E0C&color=4AF626"></a>
-  <a href="LICENSE"><img alt="MIT license" src="https://img.shields.io/badge/license-MIT-4AF626?style=flat-square&labelColor=0A0E0C"></a>
+  <a href="https://github.com/daseinlabs/parsec/releases/latest"><img alt="latest release" src="https://img.shields.io/github/v/release/daseinlabs/parsec?style=flat-square&color=2ea043"></a>
+  <a href="https://github.com/daseinlabs/parsec/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/daseinlabs/parsec/ci.yml?branch=main&style=flat-square"></a>
+  <a href="LICENSE"><img alt="MIT license" src="https://img.shields.io/badge/license-MIT-2ea043?style=flat-square"></a>
 </p>
 
 **Context savings for coding agents.** parsec is a local proxy and plugin for
@@ -53,41 +53,41 @@ touches anyone else's infrastructure.
     </td>
   </tr>
   <tr>
-    <td align="center"><a href="https://github.com/daseinlabs/plugins/releases/latest"><code>.pkg</code> installer</a></td>
-    <td align="center"><a href="https://github.com/daseinlabs/plugins/releases/latest"><code>setup.exe</code> installer</a></td>
+    <td align="center"><a href="https://github.com/daseinlabs/parsec/releases/latest"><code>.pkg</code> installer</a></td>
+    <td align="center"><a href="https://github.com/daseinlabs/parsec/releases/latest"><code>setup.exe</code> installer</a></td>
     <td align="center"><a href="#linux">one-line script</a></td>
   </tr>
 </table>
 
 Every installer signs you in when it opens the browser, then installs the
 `parsec` binary and the Claude Code plugin. The native installers are on the
-[releases page](https://github.com/daseinlabs/plugins/releases/latest) next to
+[releases page](https://github.com/daseinlabs/parsec/releases/latest) next to
 the raw binaries the scripts download.
 
 ### macOS
 
 Download `parsec-<version>-macos-arm64.pkg` from the
-[releases page](https://github.com/daseinlabs/plugins/releases/latest) and
+[releases page](https://github.com/daseinlabs/parsec/releases/latest) and
 open it, or run:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/daseinlabs/plugins/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/daseinlabs/parsec/main/scripts/install.sh | bash
 ```
 
 ### Windows
 
 Download `parsec-<version>-windows-x64-setup.exe` from the
-[releases page](https://github.com/daseinlabs/plugins/releases/latest) and run
+[releases page](https://github.com/daseinlabs/parsec/releases/latest) and run
 it, or in PowerShell:
 
 ```powershell
-irm https://raw.githubusercontent.com/daseinlabs/plugins/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/daseinlabs/parsec/main/scripts/install.ps1 | iex
 ```
 
 ### Linux
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/daseinlabs/plugins/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/daseinlabs/parsec/main/scripts/install.sh | bash
 ```
 
 The script fetches the `parsec-linux-x64` binary for the latest release and
@@ -96,7 +96,18 @@ installs the plugin.
 ### From the Claude Code CLI
 
 ```sh
-claude plugin marketplace add https://github.com/daseinlabs/plugins
+claude plugin marketplace add https://github.com/daseinlabs/parsec
+claude plugin install parsec@parsec-marketplace
+```
+
+The plugin fetches its binary from this repository's GitHub Releases on first
+use (sha256-verified against the release's `manifest.json`), so a marketplace
+install needs nothing else. Installed from the old `daseinlabs/plugins`
+marketplace? That repository is frozen at its last release. Switch once:
+
+```sh
+claude plugin marketplace remove parsec-marketplace
+claude plugin marketplace add https://github.com/daseinlabs/parsec
 claude plugin install parsec@parsec-marketplace
 ```
 
@@ -132,7 +143,6 @@ Delete it whenever you like.
 | `packages/plugin` | Markdown/JSON | The Claude Code plugin (agents, skills, hooks, launcher shims). |
 | `packages/opencode-plugin` | JS | OpenCode plugin shim. |
 | `packages/installer` | Shell/Inno | Native macOS and Windows installer sources. |
-| `packages/marketplace` | JSON | The marketplace manifest published to `daseinlabs/plugins`. |
 | `packages/brain` | Python | The scoring service: GNN inference over a curator checkpoint, self-validating bundle, calibrated tau. Self-hostable. |
 
 The training pipeline and the account platform are separate, closed
